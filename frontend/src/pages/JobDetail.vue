@@ -61,13 +61,13 @@ function tagLabel(entry) {
 }
 
 function tagColor(entry) {
-  if (entry.stream === 'error') return '#f87171'
-  if (entry.stream === 'system') return '#6b7280'
-  if (entry.event_type === 'assistant') return '#60a5fa'
-  if (entry.event_type === 'user') return '#a78bfa'
-  if (entry.event_type === 'system') return '#6b7280'
-  if (entry.event_type === 'result') return '#34d399'
-  return '#6b7280'
+  if (entry.stream === 'error') return '#c4736d'
+  if (entry.stream === 'system') return '#75736e'
+  if (entry.event_type === 'assistant') return '#7ba3c9'
+  if (entry.event_type === 'user') return '#9b8dbd'
+  if (entry.event_type === 'system') return '#75736e'
+  if (entry.event_type === 'result') return '#6aab87'
+  return '#75736e'
 }
 
 function elapsed() {
