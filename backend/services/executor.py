@@ -49,6 +49,7 @@ def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
     return [
         claude_bin,
         "-p",
+        "--verbose",
         "--dangerously-skip-permissions",
         "--output-format", "stream-json",
         "--max-turns", MAX_TURNS,
@@ -101,6 +102,45 @@ async def _update_status(job_id: str, status: str, **kwargs):
         await db.close()
 
 
+def _extract_display_message(event_type: str, parsed: dict) -> str | None:
+    """Extract a human-readable message from a stream-json event."""
+    if event_type == "assistant":
+        msg = parsed.get("message", {})
+        contents = msg.get("content", []) if isinstance(msg, dict) else []
+        parts = []
+        for block in contents:
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                name = block.get("name", "?")
+                inp = block.get("input", {})
+                desc = inp.get("description", inp.get("command", inp.get("pattern", "")))
+                if isinstance(desc, str) and len(desc) > 120:
+                    desc = desc[:120] + "..."
+                parts.append(f"[tool] {name}: {desc}" if desc else f"[tool] {name}")
+        return "\n".join(parts) if parts else None
+    if event_type == "user":
+        result = parsed.get("tool_use_result", "")
+        if isinstance(result, dict):
+            result = result.get("stdout", "") or result.get("stderr", "")
+        if isinstance(result, str) and len(result) > 200:
+            result = result[:200] + "..."
+        return result or None
+    if event_type == "system":
+        subtype = parsed.get("subtype", "")
+        if subtype == "init":
+            model = parsed.get("model", "?")
+            return f"Session initialized (model: {model})"
+        return parsed.get("message", None)
+    if event_type == "result":
+        subtype = parsed.get("subtype", "")
+        result_text = parsed.get("result", "")
+        if isinstance(result_text, str) and len(result_text) > 300:
+            result_text = result_text[:300] + "..."
+        return f"[{subtype}] {result_text}" if result_text else None
+    return None
+
+
 async def _stream_output(job_id: str, stream_name: str, stream):
     """Read subprocess output line by line, parse JSON events, and store in DB."""
     while True:
@@ -114,7 +154,8 @@ async def _stream_output(job_id: str, stream_name: str, stream):
             parsed = json.loads(text)
             event_type = parsed.get("type") if isinstance(parsed, dict) else None
             if event_type:
-                await _log(job_id, stream_name, text, event_type=event_type, metadata=text)
+                display = _extract_display_message(event_type, parsed) or f"[{event_type}]"
+                await _log(job_id, stream_name, display, event_type=event_type, metadata=text)
             else:
                 await _log(job_id, stream_name, text)
         except (json.JSONDecodeError, ValueError):

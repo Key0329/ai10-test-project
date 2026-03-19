@@ -90,17 +90,18 @@ flowchart TD
 ### Step 0：取得 Jira 認證
 
 ```bash
-BASE_URL="${JIRA_BASE_URL}"
+BASE_URL="${JIRA_BASE_URL:-${JIRA_INSTANCE_URL}}"
 EMAIL="${JIRA_EMAIL}"
-TOKEN="${JIRA_API_TOKEN}"
+TOKEN="${JIRA_API_TOKEN:-${JIRA_TOKEN}}"
 
-# 自動補上 https://
+# 去除結尾斜線並自動補上 https://
+BASE_URL="${BASE_URL%/}"
 if [[ -n "$BASE_URL" && "$BASE_URL" != https://* ]]; then
   BASE_URL="https://${BASE_URL}"
 fi
 
 if [[ -z "$BASE_URL" || -z "$EMAIL" || -z "$TOKEN" ]]; then
-  echo "[Jirara] 缺少必要環境變數：JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN" >&2
+  echo "[Jirara] 缺少必要環境變數：JIRA_BASE_URL（或 JIRA_INSTANCE_URL）/ JIRA_EMAIL / JIRA_API_TOKEN（或 JIRA_TOKEN）" >&2
   exit 1
 fi
 

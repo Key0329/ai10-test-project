@@ -32,7 +32,8 @@ async def verify_token(request: Request):
     if request.url.path in ("/api/v1/health", "/api/v1/callback"):
         return
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {API_TOKEN}":
+    query_token = request.query_params.get("token", "")
+    if auth != f"Bearer {API_TOKEN}" and query_token != API_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
 
 

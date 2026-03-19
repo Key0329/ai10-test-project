@@ -17,7 +17,7 @@ _running = False
 async def _get_next_job() -> dict | None:
     """Get the highest-priority queued job."""
     db = await get_db()
-    async with db:
+    try:
         cursor = await db.execute(
             """SELECT * FROM jobs
                WHERE status = 'queued'
@@ -26,23 +26,27 @@ async def _get_next_job() -> dict | None:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+    finally:
+        await db.close()
 
 
 async def _is_any_running() -> bool:
     """Check if a job is currently running."""
     db = await get_db()
-    async with db:
+    try:
         cursor = await db.execute(
             "SELECT COUNT(*) as cnt FROM jobs WHERE status IN ('cloning', 'running', 'pushing')"
         )
         row = await cursor.fetchone()
         return row["cnt"] > 0
+    finally:
+        await db.close()
 
 
 async def _recover_stale_jobs():
     """On startup, mark any 'running/cloning' jobs as failed (they were interrupted)."""
     db = await get_db()
-    async with db:
+    try:
         await db.execute(
             """UPDATE jobs SET status = 'failed', error_message = 'Server restarted during execution'
                WHERE status IN ('cloning', 'running', 'pushing')"""
@@ -54,6 +58,8 @@ async def _recover_stale_jobs():
         row = await cursor.fetchone()
         if row["cnt"] > 0:
             logger.warning(f"Recovered {row['cnt']} stale job(s) on startup")
+    finally:
+        await db.close()
 
 
 async def start_queue_worker():
@@ -97,7 +103,7 @@ async def start_queue_worker():
 async def cancel_job(job_id: str) -> bool:
     """Cancel a running or queued job."""
     db = await get_db()
-    async with db:
+    try:
         cursor = await db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,))
         row = await cursor.fetchone()
         if not row:
@@ -119,6 +125,8 @@ async def cancel_job(job_id: str) -> bool:
             )
             await db.commit()
             return True
+    finally:
+        await db.close()
 
     return False
 

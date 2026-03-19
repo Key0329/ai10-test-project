@@ -23,7 +23,9 @@ async function request(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const detail = err.detail;
+    const msg = Array.isArray(detail) ? detail.map(e => e.msg).join('; ') : detail || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -47,7 +49,7 @@ export async function cancelJob(jobId) {
 }
 
 export function streamLogs(jobId, onLog, onDone) {
-  const es = new EventSource(`${BASE}/jobs/${jobId}/logs`);
+  const es = new EventSource(`${BASE}/jobs/${jobId}/logs?token=${getToken()}`);
   es.addEventListener('log', (e) => {
     try {
       const parsed = JSON.parse(e.data);

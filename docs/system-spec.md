@@ -2,8 +2,9 @@
 
 | 項目 | 內容 |
 |------|------|
-| 文件版本 | 1.0 |
+| 文件版本 | 1.1 |
 | 建立日期 | 2026-03-19 |
+| 最後更新 | 2026-03-19 |
 | 狀態 | **Draft** |
 | 目標讀者 | 開發團隊 / 技術主管 |
 
@@ -11,12 +12,12 @@
 
 ## 1. 專案概述
 
-本系統旨在為團隊提供一個共用的自動化開發平台。團隊成員透過內部 Web 介面提交 Jira 工單資訊，系統會自動在 Mac Mini 上執行 Claude Code CLI，依據 repo 內預定義的開發流程（CLAUDE.md / Skills），完成從讀取需求、撰寫程式碼、執行測試到建立 Pull Request 的全自動開發流程。
+本系統旨在為團隊提供一個共用的自動化開發平台。團隊成員透過內部 Web 介面提交 Jira 工單資訊，系統會自動在 Mac Mini 上執行 Claude Code CLI，依據集中管理的 Jirara SOP（透過 `--append-system-prompt-file` 注入），完成從讀取需求、撰寫程式碼、執行測試到建立 Pull Request 的全自動開發流程。
 
 ### 1.1 目標
 
 - **降低重複性開發工作：** 讓 AI 處理結構明確、規格清楚的 Jira 工單，釋放開發者時間。
-- **統一開發流程：** 透過 CLAUDE.md 定義標準開發 SOP，確保每次自動開發的產出品質一致。
+- **統一開發流程：** 透過集中管理的 Jirara skill 定義標準開發 SOP，確保每次自動開發的產出品質一致。
 - **不改變現有工作流：** 同事在熟悉的 Web 介面操作，結果以 Pull Request 形式進入正常 code review 流程。
 
 ### 1.2 非目標（Scope 外）
@@ -34,7 +35,7 @@
 ### 2.1 架構總覽
 
 ```
-同事瀏覽器 → 前端 (React) → 後端 API (FastAPI) → Job Queue → Claude Code CLI → GitHub PR
+同事瀏覽器 → 前端 (Vue 3) → 後端 API (FastAPI) → Job Queue → Claude Code CLI → GitHub PR
 ```
 
 ```
@@ -46,7 +47,7 @@
 │              Mac Mini (192.168.x.x)           │
 │                                               │
 │  ┌─────────────┐    ┌──────────────────┐      │
-│  │ React 前端   │───→│ FastAPI 後端      │      │
+│  │ Vue 3 前端   │───→│ FastAPI 後端      │      │
 │  │ (靜態檔案)   │    │ (port 8000)      │      │
 │  └─────────────┘    └────────┬─────────┘      │
 │                              │                │
@@ -56,11 +57,15 @@
 │                              │ subprocess     │
 │                     ┌────────▼─────────┐      │
 │                     │ Claude Code CLI   │      │
-│                     │ -p --dangerous    │      │
+│                     │ -p --verbose      │      │
+│                     │ --stream-json     │      │
 │                     └────────┬─────────┘      │
 │                              │                │
 │                     ┌────────▼─────────┐      │
+│                     │ Jirara SOP 執行   │      │
 │                     │ git push + PR     │      │
+│                     │ Jira comment      │      │
+│                     │ Teams 通知        │      │
 │                     └──────────────────┘      │
 └───────────────────────────────────────────────┘
 ```
@@ -69,7 +74,7 @@
 
 | 層級 | 技術 | 選型理由 |
 |------|------|----------|
-| 前端 | React + Vite | 輕量、build 後為靜態檔案，由後端 serve |
+| 前端 | Vue 3 + Vue Router + Vite | 團隊熟悉、Composition API 開發體驗好、build 後為靜態檔案 |
 | 後端 | Python FastAPI | async 支援好、自動產生 API docs、型別安全 |
 | Job Queue | SQLite + asyncio | 零外部依賴、單機佇列管理、資料持久化不怕重啟 |
 | CLI 執行 | Claude Code (-p mode) | Max 訂閱的 CLI，non-interactive print mode |
@@ -101,10 +106,11 @@
 | POST | /api/v1/jobs | 建立新的開發 Job | Bearer Token |
 | GET | /api/v1/jobs | 列出所有 Jobs（支援分頁） | Bearer Token |
 | GET | /api/v1/jobs/{id} | 取得單一 Job 詳情 | Bearer Token |
-| GET | /api/v1/jobs/{id}/logs | 串流 Job 即時 log（SSE） | Bearer Token |
+| GET | /api/v1/jobs/{id}/logs | 串流 Job 即時 log（SSE） | Bearer Token 或 query param `?token=` |
 | POST | /api/v1/jobs/{id}/cancel | 取消執行中的 Job | Bearer Token |
-| POST | /api/v1/callback | Claude Code 完成回呼 | Internal |
 | GET | /api/v1/health | 健康檢查 | 無 |
+
+> **注意：** SSE logs 端點支援 query param `?token=xxx` 認證，因為瀏覽器原生 `EventSource` 不支援自訂 header。
 
 ### 3.2 建立 Job — POST /api/v1/jobs
 
@@ -113,7 +119,7 @@
 | 欄位 | 型別 | 必填 | 說明 |
 |------|------|------|------|
 | repo_url | string | 是 | Git repo 完整 URL |
-| jira_ticket | string | 是 | Jira 工單編號（如 JRA-123） |
+| jira_ticket | string | 是 | Jira 工單編號（如 JRA-123），前端支援從 Jira URL 自動擷取 |
 | branch | string | 否 | 指定 clone 的 branch，預設 main |
 | extra_prompt | string | 否 | 額外指令（附加在主 prompt 之後） |
 | priority | integer | 否 | 優先級 1-5，預設 3（數字越小越優先） |
@@ -131,8 +137,8 @@
 ### 3.3 Job 狀態流轉
 
 ```
-queued → cloning → running → pushing → completed
-                                    ↘ failed
+queued → cloning → running → completed
+                           ↘ failed
             （任何階段都可能轉為 failed 或 cancelled）
 ```
 
@@ -140,11 +146,12 @@ queued → cloning → running → pushing → completed
 |------|------|----------|
 | queued | 已排入佇列，等待執行 | cloning, cancelled |
 | cloning | 正在 git clone repo | running, failed |
-| running | Claude Code 正在執行開發流程 | pushing, failed, cancelled |
-| pushing | 正在 git push 並建立 PR | completed, failed |
-| completed | 已完成，PR 已建立 | （終態） |
+| running | Claude Code + Jirara 正在執行開發流程 | completed, failed, cancelled |
+| completed | 已完成（Jirara 負責 git push、PR 建立、Jira 回寫） | （終態） |
 | failed | 執行過程中發生錯誤 | （終態） |
 | cancelled | 被使用者手動取消 | （終態） |
+
+> **注意：** 不再有 `pushing` 狀態。git push 和 PR 建立由 Jirara SOP 在 `running` 階段內完成。
 
 ---
 
@@ -163,6 +170,20 @@ queued → cloning → running → pushing → completed
 ### 4.2 持久化
 
 使用 SQLite 存放 Job 資料，確保 server 重啟後不遺失佇列。資料庫檔案位於 `~/claude-workspace/.db/jobs.sqlite`。
+
+**job_logs 表結構：**
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| id | INTEGER PK | 自增 |
+| job_id | TEXT | 關聯 Job |
+| timestamp | TEXT | ISO 8601 |
+| stream | TEXT | stdout / stderr / system / error |
+| message | TEXT | 可讀的摘要文字 |
+| event_type | TEXT | stream-json 事件類型（assistant / user / system / result / raw） |
+| metadata | TEXT | 完整 JSON 事件（供進階查詢） |
+
+> `event_type` 和 `metadata` 欄位會在啟動時自動 migrate（`ALTER TABLE`），確保既有資料庫向下相容。
 
 ### 4.3 超時與重試
 
@@ -184,7 +205,7 @@ queued → cloning → running → pushing → completed
 系統實際執行的 shell 指令：
 
 ```bash
-claude -p --dangerously-skip-permissions \
+claude -p --verbose --dangerously-skip-permissions \
   --output-format stream-json \
   --max-turns ${MAX_TURNS:-50} \
   --fallback-model ${FALLBACK_MODEL:-sonnet} \
@@ -196,6 +217,7 @@ claude -p --dangerously-skip-permissions \
 
 | 旗標 | 用途 |
 |------|------|
+| `--verbose` | 啟用詳細輸出，`stream-json` 格式必須搭配此旗標 |
 | `--output-format stream-json` | 輸出結構化 JSON 事件流，支援前端分類顯示和 token/cost 追蹤 |
 | `--max-turns` | 限制 agent 輪數（軟性上限），達到時優雅停止，避免無限迴圈 |
 | `--fallback-model` | API 過載時自動降級到指定模型，避免 Job 直接失敗 |
@@ -205,7 +227,21 @@ claude -p --dangerously-skip-permissions \
 1. 主指令：`請處理 Jira 單 {jira_ticket}`（僅此一句，開發 SOP 由 Jirara skill 透過 `--append-system-prompt-file` 注入）
 2. Extra prompt：使用者自訂的額外指示（如有）
 
-### 5.2 開發 SOP 注入方式
+### 5.2 stream-json 輸出處理
+
+Executor 的 `_stream_output` 逐行解析 Claude 的 JSON 事件流，透過 `_extract_display_message` 提取可讀摘要：
+
+| 事件類型 | 提取邏輯 | 前端 Tag |
+|---------|---------|---------|
+| `assistant` | 提取 text 內容 + tool 呼叫名稱與描述 | AI（藍） |
+| `user` | 提取 tool result 的 stdout 前 200 字 | TOOL（紫） |
+| `system` (init) | 顯示 `Session initialized (model: xxx)` | INIT（灰） |
+| `result` | 提取執行結果前 300 字 | DONE（綠） |
+| 解析失敗 | 原始文字 | SYS / ERR |
+
+完整 JSON 保存在 `metadata` 欄位供進階查詢。
+
+### 5.3 開發 SOP 注入方式
 
 開發 SOP（讀取 Jira 單、建立 branch、撰寫程式碼與測試、建立 PR 等完整流程）現在由集中管理的 **Jirara skill** 透過 `--append-system-prompt-file` 統一注入，不再依賴各 repo 自備 CLAUDE.md 作為 SOP 主要來源。
 
@@ -215,45 +251,63 @@ claude -p --dangerously-skip-permissions \
 - 用途改為補充該 repo 的團隊特殊規範（如 coding style、測試框架偏好、特定 lint 設定等）
 - 不需要再包含完整的開發流程步驟，因為 Jirara skill 已涵蓋標準 SOP
 
-### 5.3 環境變數
+### 5.4 環境變數
 
 | 變數名稱 | 用途 | 範例 |
 |----------|------|------|
-| JIRA_BASE_URL | Jira API 根路徑 | `https://team.atlassian.net` |
-| JIRA_TOKEN | Jira API Token（Base64 encoded） | `dXNlckBleGFtcGxlLmNvbTp...` |
+| JIRA_BASE_URL | Jira API 根路徑（亦接受 `JIRA_INSTANCE_URL`） | `https://team.atlassian.net` |
+| JIRA_EMAIL | Jira 帳號 email | `user@company.com` |
+| JIRA_API_TOKEN | Jira API Token（亦接受 `JIRA_TOKEN`） | `ATATT3x...` |
 | GITHUB_TOKEN | GitHub Personal Access Token | `ghp_xxxxxxxxxxxx` |
 | JIRARA_SKILL_PATH | （可選）Jirara skill 檔案路徑，預設由專案路徑自動解析 | `/path/to/jirara.md` |
 | MAX_TURNS | （可選）Claude agent 最大輪數 | `50` |
 | FALLBACK_MODEL | （可選）API 過載時的降級模型 | `sonnet` |
 
+> **環境變數相容性：** Jirara SOP 支援兩組命名：`JIRA_BASE_URL` / `JIRA_INSTANCE_URL` 和 `JIRA_API_TOKEN` / `JIRA_TOKEN`，優先使用前者，無值時 fallback 到後者。
+
 ---
 
 ## 6. 前端設計
 
+前端使用 **Vue 3 Composition API（`<script setup>`）** + **Vue Router（hash mode）** + **Vite** 建構。
+
 ### 6.1 頁面結構
 
-| 頁面 | 路徑 | 功能 |
+| 頁面 | 路由 | 功能 |
 |------|------|------|
-| Dashboard | / | Job 列表 + 即時狀態 + 統計數據 |
-| New Job | /new | 建立新 Job 的表單 |
-| Job Detail | /jobs/:id | 單一 Job 詳情 + 即時 log 串流 |
+| Login | `#/login` | Token 驗證頁面（Vue Router navigation guard 自動導向） |
+| Dashboard | `#/` | Job 列表 + 即時狀態 + 統計數據 |
+| New Job | `#/new` | 建立新 Job 的表單 |
+| Job Detail | `#/jobs/:id` | 單一 Job 詳情 + 即時 log 串流 |
+
+> **Token 驗證：** 透過 Vue Router 的 `beforeEach` navigation guard 實現。未登入時自動導向 `/login`，登入後 token 存在 localStorage。
 
 ### 6.2 Dashboard 顯示資訊
 
-- 頂部統計：目前 running 數量、queued 數量、今日完成數、成功率
+- 頂部統計：目前 running 數量、queued 數量、total 數量、成功率
 - Job 列表：顯示 Jira 工單號、狀態 badge、提交者、時間、耗時
-- 即時更新：透過 SSE 推送，不需要手動 refresh
+- 即時更新：透過定時 polling（4 秒間隔）
 - 篩選：按狀態 filter（All / Running / Queued / Completed / Failed）
 
 ### 6.3 New Job 表單欄位
 
 | 欄位 | 類型 | 必填 | 驗證規則 |
 |------|------|------|----------|
-| Jira Ticket | text input | 是 | 格式：`[A-Z]+-[0-9]+`（如 JRA-123） |
+| Jira Ticket | text input | 是 | 格式：`[A-Z]+-[0-9]+`，支援貼入 Jira URL 自動擷取 ticket 號碼 |
 | Repository | dropdown / text | 是 | 預設下拉選單 + 可手動輸入 |
 | Branch | text input | 否 | 預設為空（使用 repo 的 default branch） |
 | Extra Prompt | textarea | 否 | 最大 2000 字元 |
 | Priority | select 1-5 | 否 | 預設 3（Normal） |
+
+### 6.4 Job Detail — Log 顯示
+
+Log 以結構化方式顯示，每行包含：
+
+- **彩色 Tag 標籤**：AI（藍）/ TOOL（紫）/ SYS（灰）/ ERR（紅）/ DONE（綠）
+- **可讀摘要文字**：從 stream-json 事件提取，而非原始 JSON
+- **篩選按鈕**：All / Assistant / Tools / System
+
+SSE 連線使用 `EventSource`，透過 query param `?token=xxx` 認證。
 
 ---
 
@@ -261,22 +315,22 @@ claude -p --dangerously-skip-permissions \
 
 ### 7.1 認證
 
-- **Phase 1（MVP）：** 共用 Bearer Token。所有同事使用同一個 token 存在前端環境變數中。簡單但夠用。
+- **Phase 1（MVP）：** 共用 Bearer Token。API 端點透過 `Authorization: Bearer xxx` header 驗證；SSE 端點額外支援 `?token=xxx` query param（因 EventSource 限制）。
 - **Phase 2（正式）：** 可整合公司 SSO / LDAP，或使用簡易帳號密碼登入 + JWT。
 
 ### 7.2 輸入驗證（防 Shell Injection）
 
 這是最關鍵的安全防線，因為系統使用 `--dangerously-skip-permissions`：
 
-- **repo_url：** 只允許 `https://` 開頭，白名單限定允許的 GitHub org
+- **repo_url：** 只允許 `https://` 開頭，正則驗證 URL 格式
 - **jira_ticket：** 嚴格正則驗證 `^[A-Z]{1,10}-\d{1,6}$`
 - **branch：** 只允許 `^[a-zA-Z0-9._/-]+$`
-- **extra_prompt：** 長度限制 + 禁止含有 shell 特殊字元
+- **extra_prompt：** 長度限制 2000 字元
 - **所有參數絕不拼接到 shell 指令中**，一律使用 subprocess 的 list 格式傳遞
 
 ### 7.3 Repo 白名單
 
-在後端設定允許的 GitHub organization 或 repo 列表，拒絕不在白名單內的 repo URL。避免被利用 clone 惡意 repo。
+（尚未實作）計畫在後端設定允許的 GitHub organization 或 repo 列表，拒絕不在白名單內的 repo URL。
 
 ### 7.4 網路安全
 
@@ -296,7 +350,7 @@ claude -p --dangerously-skip-permissions \
 4. 安裝 Claude Code CLI 並登入 Max 帳號
 5. Clone 本系統 repo，執行 `uv sync` 安裝依賴
 6. 設定 .env 檔案（API token、Jira 認證等）
-7. Build 前端靜態檔案
+7. Build 前端靜態檔案（`cd frontend && npm install && npm run build`）
 8. 啟動 server 並設定 launchd 開機自啟
 
 ### 8.2 自動啟動（launchd）
@@ -308,8 +362,8 @@ claude -p --dangerously-skip-permissions \
 | 日誌類型 | 位置 | 說明 |
 |----------|------|------|
 | Server log | `~/claude-workspace/.logs/server.log` | FastAPI 的 request/response log |
-| Job log | `~/claude-workspace/.logs/{job_id}.log` | 每個 Job 的完整 stdout/stderr |
-| Claude output | （存在 Job log 內） | Claude Code 的完整輸出 |
+| Job log | SQLite `job_logs` 表 | 每個 Job 的結構化事件流（含 event_type 和 metadata） |
+| Claude output | `job_logs.metadata` 欄位 | 完整 stream-json 事件供進階分析 |
 
 ### 8.4 磁碟空間管理
 
@@ -327,7 +381,7 @@ claude -p --dangerously-skip-permissions \
 | Claude Code Max 為個人訂閱 | 多人共用可能違反 Anthropic 使用條款 | 確認授權合規性；或改用 API + Team plan |
 | Rate limit | 同時多人送單時排隊時間可能很長 | Job queue 排隊 + 前端顯示預估等待時間 |
 | AI 產出品質 | Claude 可能產出有 bug 的程式碼 | 所有產出必經 code review，不自動 merge |
-| --dangerously-skip-permissions | Claude 可在 Mac Mini 上執行任意指令 | 嚴格輸入驗證 + repo 白名單 + 獨立使用者帳號 |
+| --dangerously-skip-permissions | Claude 可在 Mac Mini 上執行任意指令 | 嚴格輸入驗證 + subprocess list 格式 + 獨立使用者帳號 |
 | 單點故障 | Mac Mini 故障 = 整個系統停擺 | Phase 2 可考慮備援機器或雲端 worker |
 
 ---
@@ -337,7 +391,7 @@ claude -p --dangerously-skip-permissions \
 | Phase | 範圍 | 預估時間 |
 |-------|------|----------|
 | Phase 1 — MVP | 後端 API + Job Queue + 基本前端 + 單一 repo 驗證 | 1 週 |
-| Phase 2 — 強化 | SSE 即時 log + 多 repo + Slack 通知 + 磁碟清理 | 1 週 |
+| Phase 2 — 強化 | SSE 即時 log + 多 repo + Teams 通知 + 磁碟清理 | 1 週 |
 | Phase 3 — 正式 | 使用者認證 + Jira Webhook 入口 + 監控 dashboard | 1-2 週 |
 
 ---
@@ -348,31 +402,43 @@ claude -p --dangerously-skip-permissions \
 claude-remote-agent/
 ├── backend/
 │   ├── main.py              # FastAPI app entry point
-│   ├── db.py                # SQLite connection
+│   ├── db.py                # SQLite connection + migration
 │   ├── routers/
-│   │   ├── jobs.py          # /api/v1/jobs routes
-│   │   └── callback.py      # /api/v1/callback route
+│   │   ├── jobs.py          # /api/v1/jobs routes + SSE logs
+│   │   └── callback.py      # /api/v1/callback route (legacy)
 │   ├── services/
 │   │   ├── queue.py         # Job queue + scheduler
-│   │   ├── executor.py      # Claude Code subprocess runner
-│   │   └── validator.py     # Input validation + sanitization
+│   │   └── executor.py      # Claude Code subprocess runner + stream-json parser
 │   ├── models/
-│   │   └── job.py           # Job data model + DB schema
+│   │   └── job.py           # Pydantic models + validation
+│   ├── tests/
+│   │   ├── conftest.py
+│   │   ├── test_db.py
+│   │   ├── test_executor.py
+│   │   └── test_stream_output.py
 │   └── pyproject.toml
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx
-│   │   ├── api.js
+│   │   ├── App.vue           # Root component (header + router-view)
+│   │   ├── main.js           # Vue app entry
+│   │   ├── router.js         # Vue Router (hash mode + auth guard)
+│   │   ├── api.js            # API client (fetch + EventSource)
+│   │   ├── app.css           # Global styles
 │   │   ├── pages/
-│   │   │   ├── Dashboard.jsx
-│   │   │   ├── NewJob.jsx
-│   │   │   └── JobDetail.jsx
+│   │   │   ├── Dashboard.vue
+│   │   │   ├── NewJob.vue
+│   │   │   └── JobDetail.vue
 │   │   └── components/
-│   │       ├── TokenGate.jsx
-│   │       └── StatusBadge.jsx
+│   │       ├── TokenGate.vue  # Login page
+│   │       └── StatusBadge.vue
 │   ├── index.html
 │   ├── vite.config.js
 │   └── package.json
+├── .claude/
+│   └── skills/
+│       └── jirara.md         # Centralized development SOP
+├── docs/
+│   └── system-spec.md        # This file
 ├── .env.example
 ├── setup.sh
 └── README.md

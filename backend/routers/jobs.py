@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 async def create_job(payload: JobCreate):
     """Create a new development job."""
     db = await get_db()
-    async with db:
+    try:
         # Check for duplicate (same ticket already running/queued)
         cursor = await db.execute(
             """SELECT id FROM jobs
@@ -61,6 +61,8 @@ async def create_job(payload: JobCreate):
             (payload.priority, payload.priority, now),
         )
         pos_row = await cursor.fetchone()
+    finally:
+        await db.close()
 
     return JobResponse(
         job_id=job_id,
@@ -89,7 +91,7 @@ async def list_jobs(
 ):
     """List all jobs with optional status filter."""
     db = await get_db()
-    async with db:
+    try:
         where = "WHERE status = ?" if status else ""
         params = (status,) if status else ()
 
@@ -111,6 +113,8 @@ async def list_jobs(
             "SELECT COUNT(*) as cnt FROM jobs WHERE status = 'queued'"
         )
         queued = (await cursor.fetchone())["cnt"]
+    finally:
+        await db.close()
 
     jobs = [
         JobResponse(
@@ -139,11 +143,13 @@ async def list_jobs(
 async def get_job(job_id: str):
     """Get a single job's details."""
     db = await get_db()
-    async with db:
+    try:
         cursor = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         r = await cursor.fetchone()
         if not r:
             raise HTTPException(status_code=404, detail="Job not found")
+    finally:
+        await db.close()
 
     return JobResponse(
         job_id=r["id"],
@@ -167,16 +173,18 @@ async def get_job(job_id: str):
 async def stream_logs(job_id: str):
     """Stream job logs via SSE."""
     db = await get_db()
-    async with db:
+    try:
         cursor = await db.execute("SELECT id FROM jobs WHERE id = ?", (job_id,))
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Job not found")
+    finally:
+        await db.close()
 
     async def event_generator():
         last_id = 0
         while True:
             db = await get_db()
-            async with db:
+            try:
                 cursor = await db.execute(
                     """SELECT id, timestamp, stream, message, event_type, metadata FROM job_logs
                        WHERE job_id = ? AND id > ?
@@ -205,6 +213,8 @@ async def stream_logs(job_id: str):
                 if job and job["status"] in ("completed", "failed", "cancelled"):
                     yield {"event": "done", "data": job["status"]}
                     return
+            finally:
+                await db.close()
 
             await asyncio.sleep(1)
 

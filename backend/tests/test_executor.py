@@ -58,6 +58,7 @@ class TestBuildClaudeCommand:
 
         cmd = build_claude_command("/usr/bin/claude", "prompt text")
         assert "-p" in cmd
+        assert "--verbose" in cmd
         assert "--dangerously-skip-permissions" in cmd
 
     def test_command_includes_prompt_as_last_arg(self):
