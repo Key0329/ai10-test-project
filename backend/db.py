@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS job_logs (
     timestamp TEXT NOT NULL,
     stream TEXT DEFAULT 'stdout',
     message TEXT NOT NULL,
+    event_type TEXT DEFAULT 'raw',
+    metadata TEXT,
     FOREIGN KEY (job_id) REFERENCES jobs(id)
 );
 """

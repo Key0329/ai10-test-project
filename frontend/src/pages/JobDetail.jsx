@@ -2,10 +2,18 @@ import { useState, useEffect, useRef } from 'react'
 import { getJob, cancelJob, streamLogs } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
+const FILTER_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'assistant', label: 'Assistant' },
+  { key: 'tool', label: 'Tools' },
+  { key: 'system', label: 'System' },
+]
+
 export default function JobDetail({ jobId, onBack }) {
   const [job, setJob] = useState(null)
   const [logs, setLogs] = useState([])
   const [error, setError] = useState('')
+  const [filter, setFilter] = useState('all')
   const logRef = useRef(null)
   const streamRef = useRef(null)
 
@@ -68,13 +76,24 @@ export default function JobDetail({ jobId, onBack }) {
     return `${Math.floor(s / 60)}m ${s % 60}s`
   }
 
-  function lineClass(line) {
-    if (line.startsWith('[error]')) return 'log-line log-line-error'
-    if (line.startsWith('[stderr]')) return 'log-line log-line-stderr'
-    if (line.startsWith('[system]')) return 'log-line log-line-system'
-    if (line.startsWith('[stdout]')) return 'log-line log-line-stdout'
+  function lineClass(entry) {
+    if (entry.stream === 'error') return 'log-line log-line-error'
+    if (entry.stream === 'stderr') return 'log-line log-line-stderr'
+    if (entry.stream === 'system') return 'log-line log-line-system'
+    if (entry.event_type === 'assistant') return 'log-line log-line-stdout'
+    if (entry.event_type === 'tool_use' || entry.event_type === 'tool_result') return 'log-line log-line-system'
     return 'log-line'
   }
+
+  function matchesFilter(entry) {
+    if (filter === 'all') return true
+    if (filter === 'assistant') return entry.event_type === 'assistant'
+    if (filter === 'tool') return entry.event_type === 'tool_use' || entry.event_type === 'tool_result'
+    if (filter === 'system') return entry.stream === 'system' || entry.stream === 'error'
+    return true
+  }
+
+  const filteredLogs = logs.filter(matchesFilter)
 
   if (!job && !error) return <div className="empty">Loading...</div>
   if (error) return <div className="alert alert-error">{error}</div>
@@ -138,17 +157,34 @@ export default function JobDetail({ jobId, onBack }) {
         </div>
       )}
 
-      <div className="section-title" style={{ marginTop: 16 }}>
-        Logs {isActive && <span style={{ color: 'var(--blue)' }}>(live)</span>}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
+        <div className="section-title" style={{ margin: 0 }}>
+          Logs {isActive && <span style={{ color: 'var(--blue)' }}>(live)</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {FILTER_OPTIONS.map(opt => (
+            <button
+              key={opt.key}
+              className={`btn btn-sm${filter === opt.key ? ' btn-active' : ''}`}
+              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: filter === opt.key ? 'var(--blue)' : 'var(--surface)', color: filter === opt.key ? '#fff' : 'var(--text-dim)', cursor: 'pointer' }}
+              onClick={() => setFilter(opt.key)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="log-viewer" ref={logRef}>
-        {logs.length === 0 ? (
+        {filteredLogs.length === 0 ? (
           <div style={{ color: 'var(--text-hint)' }}>
             {isActive ? 'Waiting for output...' : 'No logs available.'}
           </div>
         ) : (
-          logs.map((line, i) => (
-            <div key={i} className={lineClass(line)}>{line}</div>
+          filteredLogs.map((entry, i) => (
+            <div key={i} className={lineClass(entry)}>
+              <span style={{ color: 'var(--text-hint)', marginRight: 6 }}>[{entry.event_type || entry.stream}]</span>
+              {entry.message}
+            </div>
           ))
         )}
       </div>

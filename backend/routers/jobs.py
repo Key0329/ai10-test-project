@@ -1,6 +1,7 @@
 """Job management routes."""
 
 import asyncio
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -177,7 +178,7 @@ async def stream_logs(job_id: str):
             db = await get_db()
             async with db:
                 cursor = await db.execute(
-                    """SELECT id, timestamp, stream, message FROM job_logs
+                    """SELECT id, timestamp, stream, message, event_type, metadata FROM job_logs
                        WHERE job_id = ? AND id > ?
                        ORDER BY id ASC""",
                     (job_id, last_id),
@@ -188,7 +189,12 @@ async def stream_logs(job_id: str):
                     last_id = row["id"]
                     yield {
                         "event": "log",
-                        "data": f"[{row['stream']}] {row['message']}",
+                        "data": json.dumps({
+                            "stream": row["stream"],
+                            "message": row["message"],
+                            "event_type": row["event_type"] or "raw",
+                            "metadata": row["metadata"],
+                        }, ensure_ascii=False),
                     }
 
                 # Check if job is finished

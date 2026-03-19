@@ -1,6 +1,7 @@
 """Claude Code CLI executor — runs claude -p as subprocess."""
 
 import asyncio
+import json
 import os
 import shutil
 import signal
@@ -12,26 +13,80 @@ from db import get_db
 WORKSPACE = os.path.expanduser(os.getenv("WORKSPACE", "~/claude-workspace"))
 CLONE_TIMEOUT = int(os.getenv("CLONE_TIMEOUT", "120"))
 JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1800"))  # 30 min
-CALLBACK_URL = os.getenv("CALLBACK_URL", "http://localhost:8000/api/v1/callback")
+MAX_TURNS = os.getenv("MAX_TURNS", "50")
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "sonnet")
+
+# Jirara skill path — resolved from project root
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+JIRARA_SKILL_PATH = os.getenv(
+    "JIRARA_SKILL_PATH",
+    os.path.join(_PROJECT_ROOT, ".claude", "skills", "jirara.md"),
+)
 
 os.makedirs(WORKSPACE, exist_ok=True)
 
 
-async def _log(job_id: str, stream: str, message: str):
+def validate_jirara_skill(path: str) -> None:
+    """Raise RuntimeError if the Jirara skill file does not exist."""
+    if not os.path.isfile(path):
+        raise RuntimeError(
+            f"Jirara skill file not found: {path}"
+        )
+
+
+def build_prompt(jira_ticket: str, extra_prompt: str | None) -> str:
+    """Build the user prompt for Claude Code."""
+    prompt = f"請處理 Jira 單 {jira_ticket}"
+    if extra_prompt:
+        prompt += f"\n\n額外指示：{extra_prompt}"
+    return prompt
+
+
+def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
+    """Build the CLI argument list for Claude Code."""
+    return [
+        claude_bin,
+        "-p",
+        "--dangerously-skip-permissions",
+        "--output-format", "stream-json",
+        "--max-turns", MAX_TURNS,
+        "--fallback-model", FALLBACK_MODEL,
+        "--append-system-prompt-file",
+        JIRARA_SKILL_PATH,
+        prompt,
+    ]
+
+
+# Validate on module load
+validate_jirara_skill(JIRARA_SKILL_PATH)
+
+
+async def _log(
+    job_id: str,
+    stream: str,
+    message: str,
+    event_type: str = "raw",
+    metadata: str | None = None,
+):
     """Write a log line to DB."""
     db = await get_db()
-    async with db:
+    try:
         await db.execute(
-            "INSERT INTO job_logs (job_id, timestamp, stream, message) VALUES (?, ?, ?, ?)",
-            (job_id, datetime.now(timezone.utc).isoformat(), stream, message),
+            "INSERT INTO job_logs (job_id, timestamp, stream, message, event_type, metadata) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (job_id, datetime.now(timezone.utc).isoformat(), stream, message, event_type, metadata),
         )
         await db.commit()
+    finally:
+        await db.close()
 
 
 async def _update_status(job_id: str, status: str, **kwargs):
     """Update job status in DB."""
     db = await get_db()
-    async with db:
+    try:
         sets = ["status = ?"]
         vals = [status]
         for k, v in kwargs.items():
@@ -42,16 +97,27 @@ async def _update_status(job_id: str, status: str, **kwargs):
             f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", vals
         )
         await db.commit()
+    finally:
+        await db.close()
 
 
 async def _stream_output(job_id: str, stream_name: str, stream):
-    """Read subprocess output line by line and store in DB."""
+    """Read subprocess output line by line, parse JSON events, and store in DB."""
     while True:
         line = await stream.readline()
         if not line:
             break
         text = line.decode("utf-8", errors="replace").rstrip()
-        if text:
+        if not text:
+            continue
+        try:
+            parsed = json.loads(text)
+            event_type = parsed.get("type") if isinstance(parsed, dict) else None
+            if event_type:
+                await _log(job_id, stream_name, text, event_type=event_type, metadata=text)
+            else:
+                await _log(job_id, stream_name, text)
+        except (json.JSONDecodeError, ValueError):
             await _log(job_id, stream_name, text)
 
 
@@ -104,22 +170,14 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         if not claude_bin:
             raise RuntimeError("claude CLI not found in PATH")
 
-        # Build prompt
-        prompt_parts = [
-            f"請處理 Jira 單 {jira_ticket}。",
-            f"完成後請用 curl 呼叫 callback API: POST {CALLBACK_URL}",
-            f'body: {{"jobId":"{job_id}","jiraTicket":"{jira_ticket}","status":"done"}}',
-            f'如果失敗則 status 改為 "failed" 並附上 error 欄位。',
-        ]
-        if extra_prompt:
-            prompt_parts.append(f"\n額外指示：{extra_prompt}")
+        prompt = build_prompt(jira_ticket, extra_prompt)
+        claude_cmd = build_claude_command(claude_bin, prompt)
 
-        prompt = "\n".join(prompt_parts)
         await _log(job_id, "system", f"Running claude -p in {work_dir}")
         await _log(job_id, "system", f"Prompt: {prompt[:500]}")
 
         proc = await asyncio.create_subprocess_exec(
-            claude_bin, "-p", "--dangerously-skip-permissions", prompt,
+            *claude_cmd,
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

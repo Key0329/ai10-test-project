@@ -48,7 +48,14 @@ export async function cancelJob(jobId) {
 
 export function streamLogs(jobId, onLog, onDone) {
   const es = new EventSource(`${BASE}/jobs/${jobId}/logs`);
-  es.addEventListener('log', (e) => onLog(e.data));
+  es.addEventListener('log', (e) => {
+    try {
+      const parsed = JSON.parse(e.data);
+      onLog(parsed);
+    } catch {
+      onLog({ stream: 'stdout', message: e.data, event_type: 'raw', metadata: null });
+    }
+  });
   es.addEventListener('done', (e) => { onDone(e.data); es.close(); });
   es.onerror = () => { es.close(); };
   return () => es.close();

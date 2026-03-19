@@ -71,9 +71,10 @@
 |------|------|----------|
 | 前端 | React + Vite | 輕量、build 後為靜態檔案，由後端 serve |
 | 後端 | Python FastAPI | async 支援好、自動產生 API docs、型別安全 |
-| Job Queue | SQLite + asyncio | 零外部依賴、適合單機場景、持久化 |
+| Job Queue | SQLite + asyncio | 零外部依賴、單機佇列管理、資料持久化不怕重啟 |
 | CLI 執行 | Claude Code (-p mode) | Max 訂閱的 CLI，non-interactive print mode |
 | 版本控制 | git + GitHub CLI (gh) | 自動 clone、push、建 PR |
+| 套件管理 | uv | 取代 pip/requirements.txt，速度快、支援 lockfile、相容 pyproject.toml |
 | 即時通知 | Server-Sent Events (SSE) | 單向推送 job 狀態更新到前端 |
 
 ### 2.3 部署環境
@@ -82,7 +83,7 @@
 |------|------|
 | 機器 | Mac Mini (Apple Silicon) |
 | OS | macOS Sonoma 或以上 |
-| Python | 3.11+ |
+| Python | 3.11+（需安裝 [uv](https://docs.astral.sh/uv/) 做套件管理） |
 | Node.js | 20+ (for Claude Code CLI) |
 | 網路 | 固定內網 IP，防火牆開放 port 8000 |
 | 存取方式 | `http://192.168.x.x:8000`（內網） |
@@ -167,8 +168,10 @@ queued → cloning → running → pushing → completed
 
 | 參數 | 預設值 | 說明 |
 |------|--------|------|
-| JOB_TIMEOUT | 30 分鐘 | 單一 Job 最大執行時間，超時自動 kill 並標記 failed |
+| JOB_TIMEOUT | 30 分鐘 | 單一 Job 最大執行時間，超時自動 kill 並標記 failed（硬性限制） |
+| MAX_TURNS | 50 | Claude agent 最大輪數，達到時優雅停止（軟性限制） |
 | CLONE_TIMEOUT | 2 分鐘 | git clone 超時 |
+| FALLBACK_MODEL | sonnet | API 過載時自動降級的模型 |
 | MAX_RETRIES | 0 | 預設不重試（Claude Code 的結果不具冪等性） |
 | QUEUE_POLL_INTERVAL | 5 秒 | 檢查 queue 的間隔 |
 
@@ -181,70 +184,36 @@ queued → cloning → running → pushing → completed
 系統實際執行的 shell 指令：
 
 ```bash
-claude -p --dangerously-skip-permissions "<prompt>"
+claude -p --dangerously-skip-permissions \
+  --output-format stream-json \
+  --max-turns ${MAX_TURNS:-50} \
+  --fallback-model ${FALLBACK_MODEL:-sonnet} \
+  --append-system-prompt-file <path-to-jirara.md> \
+  "請處理 Jira 單 {jira_ticket}"
 ```
+
+**CLI 旗標說明：**
+
+| 旗標 | 用途 |
+|------|------|
+| `--output-format stream-json` | 輸出結構化 JSON 事件流，支援前端分類顯示和 token/cost 追蹤 |
+| `--max-turns` | 限制 agent 輪數（軟性上限），達到時優雅停止，避免無限迴圈 |
+| `--fallback-model` | API 過載時自動降級到指定模型，避免 Job 直接失敗 |
 
 **Prompt 組成：**
 
-1. 主指令：`請處理 Jira 單 {jira_ticket}`
-2. Callback 指令：告知 Claude Code 完成後要呼叫哪個 API endpoint
-3. Extra prompt：使用者自訂的額外指示（如有）
+1. 主指令：`請處理 Jira 單 {jira_ticket}`（僅此一句，開發 SOP 由 Jirara skill 透過 `--append-system-prompt-file` 注入）
+2. Extra prompt：使用者自訂的額外指示（如有）
 
-### 5.2 CLAUDE.md 流程（由各 Repo 自行定義）
+### 5.2 開發 SOP 注入方式
 
-每個 repo 在根目錄放置 `CLAUDE.md` 檔案，定義該 repo 的自動化開發 SOP。Claude Code 啟動時會自動讀取。
+開發 SOP（讀取 Jira 單、建立 branch、撰寫程式碼與測試、建立 PR 等完整流程）現在由集中管理的 **Jirara skill** 透過 `--append-system-prompt-file` 統一注入，不再依賴各 repo 自備 CLAUDE.md 作為 SOP 主要來源。
 
-**建議標準流程：**
+**各 repo 的 CLAUDE.md：**
 
-1. 讀取 Jira API 取得工單內容（title、description、AC）
-2. 建立 feature branch：`feature/{TICKET_ID}`
-3. 根據需求分析並撰寫程式碼
-4. 撰寫對應的 unit tests
-5. 執行 lint + test 確保通過
-6. Commit（message 格式：`feat({TICKET}): 簡述`）
-7. Git push 並用 gh CLI 建立 Pull Request
-8. 呼叫 callback API 通知完成
-
-**CLAUDE.md 範本：**
-
-```markdown
-# CLAUDE.md
-
-## 角色
-你是這個專案的自動化開發 Agent。收到 Jira 單號時，嚴格按照以下流程執行。
-
-## 開發流程
-
-### Step 1: 讀取 Jira 單
-- curl Jira API: GET https://your-team.atlassian.net/rest/api/3/issue/{TICKET}
-- 用環境變數 JIRA_TOKEN 認證
-
-### Step 2: 建立 feature branch
-git checkout -b feature/{TICKET_ID}
-
-### Step 3: 撰寫程式碼 + 測試
-- 遵守 .eslintrc / .prettierrc
-- 每個功能都要有 unit test
-
-### Step 4: 驗證
-npm run lint && npm run test
-
-### Step 5: Commit & Push
-git add -A
-git commit -m "feat({TICKET_ID}): {描述}"
-git push origin feature/{TICKET_ID}
-
-### Step 6: 建立 PR
-gh pr create --title "[{TICKET_ID}] {title}" --body "..."
-
-### Step 7: Callback
-curl -X POST http://localhost:8000/api/v1/callback \
-  -H "Content-Type: application/json" \
-  -d '{"jobId":"{JOB_ID}","jiraTicket":"{TICKET_ID}","status":"done","prUrl":"{PR_URL}"}'
-
-## 錯誤處理
-任何步驟失敗仍要 callback，status 設為 "failed" 並附上 error 欄位。
-```
+- 仍可存在，Claude Code 啟動時會自動讀取
+- 用途改為補充該 repo 的團隊特殊規範（如 coding style、測試框架偏好、特定 lint 設定等）
+- 不需要再包含完整的開發流程步驟，因為 Jirara skill 已涵蓋標準 SOP
 
 ### 5.3 環境變數
 
@@ -253,7 +222,9 @@ curl -X POST http://localhost:8000/api/v1/callback \
 | JIRA_BASE_URL | Jira API 根路徑 | `https://team.atlassian.net` |
 | JIRA_TOKEN | Jira API Token（Base64 encoded） | `dXNlckBleGFtcGxlLmNvbTp...` |
 | GITHUB_TOKEN | GitHub Personal Access Token | `ghp_xxxxxxxxxxxx` |
-| CALLBACK_URL | 完成後回呼 URL | `http://localhost:8000/api/v1/callback` |
+| JIRARA_SKILL_PATH | （可選）Jirara skill 檔案路徑，預設由專案路徑自動解析 | `/path/to/jirara.md` |
+| MAX_TURNS | （可選）Claude agent 最大輪數 | `50` |
+| FALLBACK_MODEL | （可選）API 過載時的降級模型 | `sonnet` |
 
 ---
 
@@ -321,9 +292,9 @@ curl -X POST http://localhost:8000/api/v1/callback \
 
 1. Mac Mini 設定固定內網 IP
 2. 關閉自動休眠（系統設定 → 能源）
-3. 安裝 Python 3.11+、Node.js 20+、git、gh CLI
+3. 安裝 Python 3.11+ 與 uv、Node.js 20+、git、gh CLI
 4. 安裝 Claude Code CLI 並登入 Max 帳號
-5. Clone 本系統 repo，安裝依賴
+5. Clone 本系統 repo，執行 `uv sync` 安裝依賴
 6. 設定 .env 檔案（API token、Jira 認證等）
 7. Build 前端靜態檔案
 8. 啟動 server 並設定 launchd 開機自啟
@@ -387,7 +358,7 @@ claude-remote-agent/
 │   │   └── validator.py     # Input validation + sanitization
 │   ├── models/
 │   │   └── job.py           # Job data model + DB schema
-│   └── requirements.txt
+│   └── pyproject.toml
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
