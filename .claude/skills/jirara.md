@@ -11,6 +11,12 @@ allowed-tools: bash
 
 ---
 
+## 專案 Skills 載入
+
+執行任務前，先檢查工作目錄的 `.claude/skills/` 是否有可用的 skill，有的話載入使用。
+
+---
+
 ## 完整執行順序
 
 ```
