@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getJob, cancelJob, streamLogs, rerunJob, getJobChain } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -29,6 +29,9 @@ const chain = ref([])
 const rerunLoading = ref(false)
 let stopStream = null
 let pollInterval = null
+let streamDone = false
+let userScrolling = false
+let scrollTimer = null
 
 const isActive = computed(() =>
   job.value && ['queued', 'cloning', 'running', 'pushing'].includes(job.value.status)
@@ -150,19 +153,32 @@ async function loadChain() {
   }
 }
 
+function onLogScroll() {
+  userScrolling = true
+  clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => { userScrolling = false }, 150)
+}
+
 function startStream() {
-  if (stopStream) return
+  if (stopStream || streamDone) return
   stopStream = streamLogs(
     props.id,
     (entry) => {
       logs.value.push(entry)
-      if (logEl.value) {
-        requestAnimationFrame(() => {
-          logEl.value.scrollTop = logEl.value.scrollHeight
-        })
+      if (logEl.value && !userScrolling) {
+        const el = logEl.value
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+        if (nearBottom) {
+          nextTick(() => {
+            el.scrollTop = el.scrollHeight
+          })
+        }
       }
     },
-    () => { stopStream = null }
+    () => {
+      stopStream = null
+      streamDone = true
+    }
   )
 }
 
@@ -180,6 +196,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearInterval(pollInterval)
+  clearTimeout(scrollTimer)
   if (stopStream) {
     stopStream()
     stopStream = null
@@ -276,7 +293,7 @@ onUnmounted(() => {
         </button>
       </div>
     </div>
-    <div class="log-viewer" ref="logEl">
+    <div class="log-viewer" ref="logEl" @scroll="onLogScroll">
       <div v-if="filteredLogs.length === 0" style="color: var(--text-hint)">
         {{ isActive ? 'Waiting for output...' : 'No logs available.' }}
       </div>
