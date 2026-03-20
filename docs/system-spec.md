@@ -255,15 +255,15 @@ Executor 的 `_stream_output` 逐行解析 Claude 的 JSON 事件流，透過 `_
 
 | 變數名稱 | 用途 | 範例 |
 |----------|------|------|
-| JIRA_BASE_URL | Jira API 根路徑（亦接受 `JIRA_INSTANCE_URL`） | `https://team.atlassian.net` |
+| JIRA_BASE_URL | Jira API 根路徑 | `https://team.atlassian.net` |
 | JIRA_EMAIL | Jira 帳號 email | `user@company.com` |
-| JIRA_API_TOKEN | Jira API Token（亦接受 `JIRA_TOKEN`） | `ATATT3x...` |
+| JIRA_API_TOKEN | Jira API Token | `ATATT3x...` |
 | GITHUB_TOKEN | GitHub Personal Access Token | `ghp_xxxxxxxxxxxx` |
 | JIRARA_SKILL_PATH | （可選）Jirara skill 檔案路徑，預設由專案路徑自動解析 | `/path/to/jirara.md` |
 | MAX_TURNS | （可選）Claude agent 最大輪數 | `50` |
 | FALLBACK_MODEL | （可選）API 過載時的降級模型 | `sonnet` |
 
-> **環境變數相容性：** Jirara SOP 支援兩組命名：`JIRA_BASE_URL` / `JIRA_INSTANCE_URL` 和 `JIRA_API_TOKEN` / `JIRA_TOKEN`，優先使用前者，無值時 fallback 到後者。
+> **環境變數命名：** 統一使用 `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`。
 
 ---
 
