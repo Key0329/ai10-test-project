@@ -13,6 +13,10 @@ class JobCreate(BaseModel):
     extra_prompt: Optional[str] = Field(None, max_length=2000)
     priority: int = Field(3, ge=1, le=5)
     requested_by: Optional[str] = Field(None, max_length=100)
+    # 憑證欄位：只用於本次執行，不寫入 DB
+    github_token: str = Field(..., description="GitHub Personal Access Token")
+    jira_api_token: str = Field(..., description="Jira API Token")
+    jira_email: str = Field(..., description="Jira account email")
 
     @field_validator("jira_ticket")
     @classmethod
@@ -62,6 +66,13 @@ class JobListResponse(BaseModel):
     total: int
     running: int
     queued: int
+
+
+class RerunRequest(BaseModel):
+    """Rerun 時傳入的憑證，不寫入 DB。"""
+    github_token: str
+    jira_api_token: str
+    jira_email: str
 
 
 class CallbackPayload(BaseModel):

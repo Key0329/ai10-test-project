@@ -9,8 +9,9 @@ from fastapi import APIRouter, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
 from db import get_db
-from models.job import JobCreate, JobResponse, JobListResponse
-from services.queue import cancel_job
+from models.job import JobCreate, JobResponse, JobListResponse, RerunRequest
+from services.executor import execute_job
+from services.queue import cancel_job, _running_tasks, _on_task_done
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -86,6 +87,22 @@ async def create_job(payload: JobCreate):
         pos_row = await cursor.fetchone()
     finally:
         await db.close()
+
+    # 直接執行，不透過 queue worker（queue worker 已暫時停用）
+    task = asyncio.create_task(
+        execute_job(
+            job_id=job_id,
+            repo_url=payload.repo_url,
+            jira_ticket=payload.jira_ticket,
+            branch=payload.branch,
+            extra_prompt=payload.extra_prompt,
+            github_token=payload.github_token,
+            jira_api_token=payload.jira_api_token,
+            jira_email=payload.jira_email,
+        )
+    )
+    task.add_done_callback(lambda t, j=job_id: _on_task_done(j, t))
+    _running_tasks[job_id] = task
 
     return JobResponse(
         job_id=job_id,
@@ -263,16 +280,16 @@ async def stream_logs(job_id: str):
 
 
 @router.post("/{job_id}/rerun", status_code=202, response_model=JobResponse)
-async def rerun_job(job_id: str):
+async def rerun_job(job_id: str, payload: RerunRequest):
     """Rerun a completed or failed job by creating a new job with the same parameters."""
     db = await get_db()
     try:
-        return await _rerun_job_impl(job_id, db)
+        return await _rerun_job_impl(job_id, db, payload)
     finally:
         await db.close()
 
 
-async def _rerun_job_impl(job_id: str, db) -> JobResponse:
+async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse:
     """Core rerun logic, extracted for testability."""
     cursor = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
     original = await cursor.fetchone()
@@ -327,6 +344,22 @@ async def _rerun_job_impl(job_id: str, db) -> JobResponse:
         (original["priority"], original["priority"], now),
     )
     pos_row = await cursor.fetchone()
+
+    # 直接執行，不透過 queue worker（queue worker 已暫時停用）
+    task = asyncio.create_task(
+        execute_job(
+            job_id=new_job_id,
+            repo_url=original["repo_url"],
+            jira_ticket=original["jira_ticket"],
+            branch=original["branch"],
+            extra_prompt=original["extra_prompt"],
+            github_token=payload.github_token,
+            jira_api_token=payload.jira_api_token,
+            jira_email=payload.jira_email,
+        )
+    )
+    task.add_done_callback(lambda t, j=new_job_id: _on_task_done(j, t))
+    _running_tasks[new_job_id] = task
 
     return JobResponse(
         job_id=new_job_id,

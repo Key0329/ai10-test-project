@@ -3,6 +3,14 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { listJobs } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
+import { useCredentials } from '../composables/useCredentials'
+
+const { credentials, save: saveCredentials } = useCredentials()
+const showTokens = ref({ github: false, jira: false })
+
+function onCredentialInput() {
+  saveCredentials()
+}
 
 const router = useRouter()
 
@@ -65,6 +73,60 @@ onUnmounted(() => {
 <template>
   <div>
     <div v-if="error" class="alert alert-error">{{ error }}</div>
+
+    <!-- Credentials 設定區 -->
+    <div style="border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 16px; margin-bottom: 16px">
+      <div style="font-size: 11px; font-weight: 600; color: var(--text-hint); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px">
+        🔑 API Credentials <span style="font-weight: 400; color: var(--text-dim)">(session only · 關分頁即清除)</span>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px">
+        <div>
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px">GitHub Token</div>
+          <div style="position: relative">
+            <input
+              :type="showTokens.github ? 'text' : 'password'"
+              class="form-input"
+              style="padding-right: 32px; font-size: 12px"
+              v-model="credentials.github_token"
+              placeholder="ghp_xxxxxxxxxxxx"
+              @input="onCredentialInput"
+            />
+            <span
+              style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--text-hint); font-size: 13px; user-select: none"
+              @click="showTokens.github = !showTokens.github"
+            >{{ showTokens.github ? '🙈' : '👁' }}</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px">Jira API Token</div>
+          <div style="position: relative">
+            <input
+              :type="showTokens.jira ? 'text' : 'password'"
+              class="form-input"
+              style="padding-right: 32px; font-size: 12px"
+              v-model="credentials.jira_api_token"
+              placeholder="ATATT3xxxxxxxxxxx"
+              @input="onCredentialInput"
+            />
+            <span
+              style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--text-hint); font-size: 13px; user-select: none"
+              @click="showTokens.jira = !showTokens.jira"
+            >{{ showTokens.jira ? '🙈' : '👁' }}</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px">Jira Email</div>
+          <input
+            type="email"
+            class="form-input"
+            style="font-size: 12px"
+            v-model="credentials.jira_email"
+            placeholder="you@company.com"
+            @input="onCredentialInput"
+          />
+        </div>
+      </div>
+    </div>
 
     <div class="stats">
       <div class="stat-card">

@@ -85,6 +85,8 @@ if [ ! -f "$PLIST_PATH" ]; then
         <string>0.0.0.0</string>
         <string>--port</string>
         <string>8000</string>
+        <string>--http</string>
+        <string>h11</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${SCRIPT_DIR}/backend</string>
@@ -117,7 +119,7 @@ echo ""
 echo "  Quick start:"
 echo "    cd backend"
 echo "    source .venv/bin/activate"
-echo "    uvicorn main:app --host 0.0.0.0 --port 8000"
+echo "    uvicorn main:app --host 0.0.0.0 --port 8000 --http h11"
 echo ""
 echo "  Auto-start on boot:"
 echo "    launchctl load $PLIST_PATH"

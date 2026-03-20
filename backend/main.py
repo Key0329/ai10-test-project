@@ -5,13 +5,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from db import init_db
 from routers import jobs, callback
-from services.queue import start_queue_worker, stop_queue_worker
+# from services.queue import start_queue_worker, stop_queue_worker  # 暫時停用 queue worker
 
 # ─── Logging ───────────────────────────────────────────────────────
 logging.basicConfig(
@@ -22,19 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 # ─── Config ────────────────────────────────────────────────────────
-API_TOKEN = os.getenv("API_TOKEN", "change-me")
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-
-
-# ─── Auth dependency ───────────────────────────────────────────────
-async def verify_token(request: Request):
-    """Simple Bearer token auth. Skip for health check and callback."""
-    if request.url.path in ("/api/v1/health", "/api/v1/callback"):
-        return
-    auth = request.headers.get("Authorization", "")
-    query_token = request.query_params.get("token", "")
-    if auth != f"Bearer {API_TOKEN}" and query_token != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid or missing token")
 
 
 # ─── App lifecycle ─────────────────────────────────────────────────
@@ -43,17 +31,17 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
-    queue_task = asyncio.create_task(start_queue_worker())
-    logger.info("Queue worker started")
+    # queue_task = asyncio.create_task(start_queue_worker())  # 暫時停用：job 直接執行不透過 queue
+    # logger.info("Queue worker started")
 
     yield
 
-    stop_queue_worker()
-    queue_task.cancel()
-    try:
-        await queue_task
-    except asyncio.CancelledError:
-        pass
+    # stop_queue_worker()                                      # 暫時停用：queue worker 關閉
+    # queue_task.cancel()
+    # try:
+    #     await queue_task
+    # except asyncio.CancelledError:
+    #     pass
     logger.info("Shutdown complete")
 
 
@@ -66,7 +54,7 @@ app = FastAPI(
 
 
 # ─── Routes ────────────────────────────────────────────────────────
-app.include_router(jobs.router, dependencies=[Depends(verify_token)])
+app.include_router(jobs.router)
 app.include_router(callback.router)
 
 

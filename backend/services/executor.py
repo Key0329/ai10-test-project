@@ -17,36 +17,41 @@ JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "1800"))  # 30 min
 MAX_TURNS = os.getenv("MAX_TURNS", "50")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "sonnet")
 
-# Jirara skill path — resolved from project root
-_PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
-JIRARA_SKILL_PATH = os.getenv(
-    "JIRARA_SKILL_PATH",
-    os.path.join(_PROJECT_ROOT, ".claude", "skills", "jirara.md"),
-)
-
 os.makedirs(WORKSPACE, exist_ok=True)
-
-
-def validate_jirara_skill(path: str) -> None:
-    """Raise RuntimeError if the Jirara skill file does not exist."""
-    if not os.path.isfile(path):
-        raise RuntimeError(
-            f"Jirara skill file not found: {path}"
-        )
 
 
 def build_prompt(jira_ticket: str, extra_prompt: str | None) -> str:
     """Build the user prompt for Claude Code."""
-    prompt = f"請處理 Jira 單 {jira_ticket}"
+    # 強制自主執行 + 嚴格遵守 repo 內規範
+    autonomous_header = (
+        "你正在自動化流程中執行，沒有人工監控。\n"
+        "\n"
+        "【執行規則 — 不可違反】\n"
+        "1. 不得詢問使用者任何問題或等待輸入，所有決策自行判斷並直接執行\n"
+        "2. 不要呈現方案讓使用者選擇，直接選擇最合適的方案執行\n"
+        "3. 遇到不確定的情況，採取最保守、最安全的做法自行處理\n"
+        "\n"
+        "【規範遵守 — 最高優先】\n"
+        "4. 你目前的工作目錄（cwd）就是剛 clone 下來的 target repo，讀取並嚴格遵守該目錄內的 CLAUDE.md\n"
+        "5. 開始寫任何程式碼之前，必須先閱讀該 target repo 內 .claude/skills/ 下所有 skill 內容，理解本專案的開發規範後才能動手\n"
+        "6. 開發每個功能時，主動判斷哪些 skill 適用並確實套用其 pattern，不得跳過\n"
+        "7. 開發過程中的每個步驟（命名、架構、測試、PR 格式等）都必須符合該 target repo 規範\n"
+        "8. 每次任務的 target repo 語言與規範都不同，以 cwd 內實際存在的 CLAUDE.md 和 skills 為準，不可假設\n"
+        "\n"
+        "\n"
+    )
+    prompt = autonomous_header + f"請處理 Jira 單 {jira_ticket}"
     if extra_prompt:
         prompt += f"\n\n額外指示：{extra_prompt}"
     return prompt
 
 
 def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
-    """Build the CLI argument list for Claude Code."""
+    """Build the CLI argument list for Claude Code.
+
+    不注入外部 skill 檔案 — Claude 執行時的 cwd 是 clone 下來的 repo，
+    會自動讀取該 repo 的 CLAUDE.md 與 .claude/skills/，由 Claude 自行決定觸發哪個 skill。
+    """
     return [
         claude_bin,
         "-p",
@@ -55,14 +60,8 @@ def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
         "--output-format", "stream-json",
         "--max-turns", MAX_TURNS,
         "--fallback-model", FALLBACK_MODEL,
-        "--append-system-prompt-file",
-        JIRARA_SKILL_PATH,
         prompt,
     ]
-
-
-# Validate on module load
-validate_jirara_skill(JIRARA_SKILL_PATH)
 
 
 async def _log(
@@ -161,7 +160,12 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
 async def _stream_output(job_id: str, stream_name: str, stream):
     """Read subprocess output line by line, parse JSON events, and store in DB."""
     while True:
-        line = await stream.readline()
+        try:
+            line = await stream.readline()
+        except ValueError:
+            # 單行超過 StreamReader limit（理論上不應發生，limit 已設為 10MB）
+            await _log(job_id, stream_name, "[line too long, skipped]", event_type="raw")
+            continue
         if not line:
             break
         text = line.decode("utf-8", errors="replace").rstrip()
@@ -178,6 +182,193 @@ async def _stream_output(job_id: str, stream_name: str, stream):
                 await _log(job_id, stream_name, text)
         except (json.JSONDecodeError, ValueError):
             await _log(job_id, stream_name, text)
+
+
+def _read_skill_content(skills_dir: str, skill_name: str) -> tuple[str, str]:
+    """讀取 skill 的 description 和完整內容。Returns (description, full_content)."""
+    skill_dir = os.path.join(skills_dir, skill_name)
+    candidates = []
+    if os.path.isdir(skill_dir):
+        candidates = [os.path.join(skill_dir, f) for f in os.listdir(skill_dir) if f.endswith(".md")]
+    else:
+        flat = os.path.join(skills_dir, f"{skill_name}.md")
+        if os.path.isfile(flat):
+            candidates = [flat]
+
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            description = ""
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith("description:"):
+                    description = line.split(":", 1)[1].strip().strip('"').strip("'")
+                    break
+            return description, content
+        except OSError:
+            pass
+    return "", ""
+
+
+def _extract_skill_keywords(skill_content: str) -> list[str]:
+    """從 skill 內容中抽取關鍵 code pattern（程式碼區塊內的關鍵字）。"""
+    keywords = []
+    in_code_block = False
+    for line in skill_content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block and stripped:
+            # 取有意義的 token（過濾太短或太泛的）
+            for token in re.findall(r'[a-zA-Z_][a-zA-Z0-9_]{3,}', stripped):
+                if token not in {"const", "type", "import", "export", "from", "return",
+                                  "function", "async", "await", "interface", "class"}:
+                    keywords.append(token)
+    return list(dict.fromkeys(keywords))[:20]  # 去重，最多取 20 個
+
+
+def _read_skill_description(skills_dir: str, skill_name: str) -> str:
+    """從 SKILL.md 讀取 skill 的 description frontmatter 或第一行說明。"""
+    skill_dir = os.path.join(skills_dir, skill_name)
+    candidates = []
+    if os.path.isdir(skill_dir):
+        candidates = [os.path.join(skill_dir, f) for f in os.listdir(skill_dir) if f.endswith(".md")]
+    else:
+        flat = os.path.join(skills_dir, f"{skill_name}.md")
+        if os.path.isfile(flat):
+            candidates = [flat]
+
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = f.read(1000)
+            # 嘗試讀 frontmatter description
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith("description:"):
+                    desc = line.split(":", 1)[1].strip().strip('"').strip("'")
+                    if desc:
+                        return desc
+            # fallback：取第一個非空、非 frontmatter 的行
+            in_frontmatter = False
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped == "---":
+                    in_frontmatter = not in_frontmatter
+                    continue
+                if not in_frontmatter and stripped and not stripped.startswith("#"):
+                    return stripped[:100]
+        except OSError:
+            pass
+    return ""
+
+
+async def _emit_compliance_check(job_id: str, work_dir: str):
+    """執行完成後，交叉比對 repo 規範（CLAUDE.md & skills）是否有實際被調用。"""
+    db = await get_db()
+    try:
+        lines = ["────── 規範合規檢查 ──────"]
+
+        # 1. CLAUDE.md — 確認 repo 有 CLAUDE.md 且 CC 有成功啟動
+        claude_md_path = None
+        for p in ["CLAUDE.md", ".claude/CLAUDE.md"]:
+            if os.path.isfile(os.path.join(work_dir, p)):
+                claude_md_path = p
+                break
+
+        cursor = await db.execute(
+            "SELECT id FROM job_logs WHERE job_id = ? AND event_type = 'system' AND message LIKE '%Session initialized%'",
+            (job_id,),
+        )
+        cc_started = await cursor.fetchone() is not None
+
+        if claude_md_path and cc_started:
+            lines.append(f"✅ CLAUDE.md 已載入（{claude_md_path}）")
+        elif claude_md_path and not cc_started:
+            lines.append(f"⚠️  CLAUDE.md 存在（{claude_md_path}）但 CC 未成功啟動")
+        else:
+            lines.append("⬜ CLAUDE.md：repo 內找不到，CC 以預設行為執行")
+
+        # 2. Skills — 取得 repo 內的 skill 清單，與實際調用次數交叉比對
+        skills_dir = os.path.join(work_dir, ".claude", "skills")
+        repo_skills = []  # list of skill names in order
+        if os.path.isdir(skills_dir):
+            for entry in sorted(os.listdir(skills_dir)):
+                entry_path = os.path.join(skills_dir, entry)
+                if os.path.isdir(entry_path):
+                    if any(f.endswith(".md") for f in os.listdir(entry_path)):
+                        repo_skills.append(entry)
+                elif entry.endswith(".md"):
+                    repo_skills.append(entry[:-3])
+
+        # 取得實際被調用的 skills 及次數
+        cursor = await db.execute(
+            "SELECT message FROM job_logs WHERE job_id = ? AND event_type = 'skill'",
+            (job_id,),
+        )
+        skill_rows = await cursor.fetchall()
+        invoked_counts: dict[str, int] = {}
+        for r in skill_rows:
+            match = re.search(r"\[skill\] Skill:\s*(\S+)", r["message"])
+            if match:
+                key = match.group(1).lower()
+                invoked_counts[key] = invoked_counts.get(key, 0) + 1
+
+        # 3. 取得 git diff（本次任務的所有改動）
+        diff_content = ""
+        try:
+            diff_proc = await asyncio.create_subprocess_exec(
+                "git", "diff", "HEAD",
+                cwd=work_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            diff_stdout, _ = await asyncio.wait_for(diff_proc.communicate(), timeout=30)
+            diff_content = diff_stdout.decode("utf-8", errors="replace")
+        except Exception:
+            pass
+
+        if not diff_content:
+            # fallback：取最後一個 commit 的 diff
+            try:
+                diff_proc = await asyncio.create_subprocess_exec(
+                    "git", "show", "--stat", "HEAD",
+                    cwd=work_dir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                diff_stdout, _ = await asyncio.wait_for(diff_proc.communicate(), timeout=30)
+                diff_content = diff_stdout.decode("utf-8", errors="replace")
+            except Exception:
+                pass
+
+        if repo_skills:
+            lines.append(f"\nRepo Skills 合規驗收（共 {len(repo_skills)} 個）：")
+            for skill in repo_skills:
+                desc, skill_content = _read_skill_content(skills_dir, skill)
+                desc_str = f"  # {desc}" if desc else ""
+
+                if not diff_content:
+                    lines.append(f"  ⬜ {skill}（無法取得 diff，跳過驗收）{desc_str}")
+                    continue
+
+                # 從 skill 內容抽取關鍵 patterns，掃 diff 是否有出現
+                keywords = _extract_skill_keywords(skill_content)
+                matched = [kw for kw in keywords if kw in diff_content]
+
+                if matched:
+                    lines.append(f"  ✅ {skill} — 改動中偵測到規範 pattern（{', '.join(matched[:5])}）{desc_str}")
+                else:
+                    lines.append(f"  ⚠️  {skill} — 改動中未偵測到規範 pattern{desc_str}")
+        else:
+            lines.append("⬜ Skills：repo 內找不到 .claude/skills/")
+
+        lines.append("\n──────────────────────────")
+        await _log(job_id, "system", "\n".join(lines), event_type="system")
+    finally:
+        await db.close()
 
 
 async def _emit_summary(job_id: str):
@@ -267,8 +458,62 @@ def _cleanup_workdir(work_dir: str) -> bool:
         return False
 
 
+async def _verify_repo_config(job_id: str, work_dir: str) -> None:
+    """驗證 clone 下來的 repo 是否有 CLAUDE.md 與 .claude/skills/，並記錄到 log。"""
+    lines = ["────── Repo 設定驗證 ──────"]
+
+    # 1. 找所有 CLAUDE.md（根目錄 + .claude/）
+    claude_md_paths = []
+    for candidate in [
+        os.path.join(work_dir, "CLAUDE.md"),
+        os.path.join(work_dir, ".claude", "CLAUDE.md"),
+    ]:
+        if os.path.isfile(candidate):
+            rel = os.path.relpath(candidate, work_dir)
+            claude_md_paths.append(rel)
+
+    if claude_md_paths:
+        lines.append(f"✅ CLAUDE.md：{', '.join(claude_md_paths)}")
+    else:
+        lines.append("⚠️  CLAUDE.md：找不到（Claude 將以預設行為執行）")
+
+    # 2. 找 .claude/skills/ 下的所有 skill（支援 folder/SKILL.md 與直接放 .md 兩種格式）
+    skills_dir = os.path.join(work_dir, ".claude", "skills")
+    if os.path.isdir(skills_dir):
+        skill_names = []
+        for entry in sorted(os.listdir(skills_dir)):
+            entry_path = os.path.join(skills_dir, entry)
+            if os.path.isdir(entry_path):
+                # folder 格式：skills/jirara/SKILL.md 或 skills/jirara/*.md
+                md_files = [f for f in os.listdir(entry_path) if f.endswith(".md")]
+                if md_files:
+                    skill_names.append(entry)
+            elif entry.endswith(".md"):
+                # 直接放 .md 格式
+                skill_names.append(entry)
+        if skill_names:
+            lines.append(f"✅ Skills（{len(skill_names)} 個）：{', '.join(skill_names)}")
+        else:
+            lines.append("⚠️  .claude/skills/ 存在但沒有找到任何 skill")
+    else:
+        lines.append("⚠️  Skills：找不到 .claude/skills/ 目錄")
+
+    lines.append("──────────────────────────")
+    await _log(job_id, "system", "\n".join(lines), event_type="system")
+
+
+def _inject_token_to_url(repo_url: str, token: str) -> str:
+    """將 GitHub token 注入 HTTPS clone URL。
+    https://github.com/org/repo.git → https://x-access-token:{token}@github.com/org/repo.git
+    """
+    if repo_url.startswith("https://"):
+        return repo_url.replace("https://", f"https://x-access-token:{token}@", 1)
+    return repo_url
+
+
 async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
-                      branch: str | None, extra_prompt: str | None):
+                      branch: str | None, extra_prompt: str | None,
+                      github_token: str = "", jira_api_token: str = "", jira_email: str = ""):
     """Full execution: clone → claude -p → report result."""
 
     work_dir = os.path.join(WORKSPACE, f"{jira_ticket}-{job_id.split('-')[-1]}")
@@ -277,12 +522,16 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
     try:
         # ── Step 1: Clone ──
         await _update_status(job_id, "cloning", started_at=now, work_dir=work_dir)
-        await _log(job_id, "system", f"Cloning {repo_url} into {work_dir}")
+
+        # 注入 token 到 URL，log 顯示遮罩版本
+        authenticated_url = _inject_token_to_url(repo_url, github_token) if github_token else repo_url
+        masked_url = repo_url.replace("https://", "https://x-access-token:***@", 1) if github_token else repo_url
+        await _log(job_id, "system", f"Cloning {masked_url} into {work_dir}")
 
         clone_cmd = ["git", "clone", "--depth", "1"]
         if branch:
             clone_cmd += ["-b", branch]
-        clone_cmd += [repo_url, work_dir]
+        clone_cmd += [authenticated_url, work_dir]
 
         proc = await asyncio.create_subprocess_exec(
             *clone_cmd,
@@ -301,6 +550,9 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
             raise RuntimeError(f"git clone failed: {stderr.decode()}")
 
         await _log(job_id, "system", "Clone complete")
+
+        # ── Step 1.5: 驗證 repo 的 CLAUDE.md 與 skills ──
+        await _verify_repo_config(job_id, work_dir)
 
         # ── Step 2: Run Claude Code ──
         await _update_status(job_id, "running")
@@ -322,12 +574,21 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         await _log(job_id, "system", f"Running claude -p in {work_dir}")
         await _log(job_id, "system", f"Prompt: {prompt[:500]}")
 
+        # 明確排除三個 credential key，確保只吃使用者在前端輸入的值
+        _credential_keys = {"GITHUB_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL"}
+        base_env = {k: v for k, v in os.environ.items() if k not in _credential_keys}
         proc = await asyncio.create_subprocess_exec(
             *claude_cmd,
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "PATH": os.environ.get("PATH", "")},
+            limit=10 * 1024 * 1024,  # 10MB：避免 claude 大型輸出觸發 StreamReader 上限
+            env={
+                **base_env,
+                "GITHUB_TOKEN": github_token,
+                "JIRA_API_TOKEN": jira_api_token,
+                "JIRA_EMAIL": jira_email,
+            },
         )
 
         # Stream output concurrently
@@ -350,8 +611,9 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         exit_code = proc.returncode
         await _log(job_id, "system", f"Claude exited with code {exit_code}")
 
-        # Emit execution summary before final status update
+        # Emit execution summary and compliance check before final status update
         await _emit_summary(job_id)
+        await _emit_compliance_check(job_id, work_dir)
 
         if exit_code == 0:
             await _update_status(

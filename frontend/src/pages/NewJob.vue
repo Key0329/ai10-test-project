@@ -2,8 +2,10 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { createJob } from '../api'
+import { useCredentials } from '../composables/useCredentials'
 
 const router = useRouter()
+const { credentials, validate: validateCredentials } = useCredentials()
 
 const DEFAULT_REPOS = [
   // Add your team's repos here
@@ -27,6 +29,11 @@ async function handleSubmit() {
     error.value = 'Repo URL and Jira Ticket are required'
     return
   }
+  const credError = validateCredentials()
+  if (credError) {
+    error.value = credError
+    return
+  }
   error.value = ''
   submitting.value = true
 
@@ -42,6 +49,9 @@ async function handleSubmit() {
       extra_prompt: form.extra_prompt || undefined,
       priority: form.priority,
       requested_by: form.requested_by || undefined,
+      github_token: credentials.github_token,
+      jira_api_token: credentials.jira_api_token,
+      jira_email: credentials.jira_email,
     })
     router.push(`/jobs/${res.job_id}`)
   } catch (e) {

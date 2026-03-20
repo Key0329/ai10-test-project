@@ -1,23 +1,10 @@
 const BASE = '/api/v1';
 
-function getToken() {
-  return localStorage.getItem('cra_token') || '';
-}
-
-export function setToken(token) {
-  localStorage.setItem('cra_token', token);
-}
-
-export function getStoredToken() {
-  return getToken();
-}
-
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${getToken()}`,
       ...options.headers,
     },
   });
@@ -49,7 +36,7 @@ export async function cancelJob(jobId) {
 }
 
 export function streamLogs(jobId, onLog, onDone) {
-  const es = new EventSource(`${BASE}/jobs/${jobId}/logs?token=${getToken()}`);
+  const es = new EventSource(`${BASE}/jobs/${jobId}/logs`);
   es.addEventListener('log', (e) => {
     try {
       const parsed = JSON.parse(e.data);
@@ -63,8 +50,8 @@ export function streamLogs(jobId, onLog, onDone) {
   return () => es.close();
 }
 
-export async function rerunJob(jobId) {
-  return request(`/jobs/${jobId}/rerun`, { method: 'POST' });
+export async function rerunJob(jobId, credentials) {
+  return request(`/jobs/${jobId}/rerun`, { method: 'POST', body: JSON.stringify(credentials) });
 }
 
 export async function getJobChain(jobId) {

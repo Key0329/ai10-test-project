@@ -3,9 +3,11 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getJob, cancelJob, streamLogs, rerunJob, getJobChain } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
+import { useCredentials } from '../composables/useCredentials'
 
 const router = useRouter()
 const route = useRoute()
+const { credentials, validate: validateCredentials } = useCredentials()
 
 const FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
@@ -133,10 +135,19 @@ async function handleCancel() {
 }
 
 async function handleRerun() {
+  const credError = validateCredentials()
+  if (credError) {
+    error.value = credError
+    return
+  }
   rerunLoading.value = true
   error.value = ''
   try {
-    const newJob = await rerunJob(props.id)
+    const newJob = await rerunJob(props.id, {
+      github_token: credentials.github_token,
+      jira_api_token: credentials.jira_api_token,
+      jira_email: credentials.jira_email,
+    })
     router.push(`/jobs/${newJob.job_id}`)
   } catch (e) {
     error.value = e.message
