@@ -13272,3 +13272,256 @@ tests:
   - frontend/node_modules/gensync/test/index.test.js
   - backend/tests/test_stream_output.py
 -->
+
+---
+### Requirement: Light-dark mixed theme with dual font strategy
+
+The frontend SHALL use a blue-gray background (`#e8ecf1`) for all UI areas except the log viewer, which SHALL remain dark (#1a1b1e). UI elements (headers, buttons, labels) SHALL use a sans-serif font stack (system-ui, -apple-system, sans-serif), while code-oriented content (ticket IDs, repository URLs, log output) SHALL use a monospace font stack. Surface, border, and muted text colors SHALL use a cold-tone palette consistent with the blue-gray background.
+
+#### Scenario: Page background is blue-gray
+
+- **WHEN** any page (Dashboard, NewJob, JobDetail, TokenGate) is rendered
+- **THEN** the page background SHALL be blue-gray (`#e8ecf1`)
+
+#### Scenario: Surface elements use cold-tone white
+
+- **WHEN** cards, forms, or stat elements are rendered
+- **THEN** the surface background SHALL be `#f4f6f9` and borders SHALL be `#d0d5dd`
+
+#### Scenario: Log viewer remains dark
+
+- **WHEN** the JobDetail page log viewer is rendered
+- **THEN** the log viewer background SHALL be dark (#1a1b1e)
+
+#### Scenario: UI text uses sans-serif
+
+- **WHEN** a header, button, label, or descriptive text element is rendered
+- **THEN** the font-family SHALL be system-ui, -apple-system, sans-serif
+
+#### Scenario: Code content uses monospace
+
+- **WHEN** a ticket ID, repository URL, or log line is rendered
+- **THEN** the font-family SHALL be a monospace font stack
+
+
+<!-- @trace
+source: log-summary-and-theme
+updated: 2026-03-20
+code:
+  - backend/services/queue.py
+  - frontend/src/api.js
+  - backend/models/job.py
+  - backend/db.py
+  - frontend/src/app.css
+  - backend/jirara.db
+  - backend/routers/jobs.py
+  - backend/services/executor.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_emit_summary.py
+  - backend/tests/test_event_classify.py
+-->
+
+---
+### Requirement: Rerun button on JobDetail page
+
+The JobDetail page SHALL display a Rerun button that triggers `POST /api/v1/jobs/{id}/rerun` and navigates to the newly created job's detail page upon success.
+
+#### Scenario: Rerun button visible for completed job
+
+- **WHEN** user views a job with status `completed`
+- **THEN** the Rerun button is visible and enabled
+
+#### Scenario: Rerun button visible for failed job
+
+- **WHEN** user views a job with status `failed`
+- **THEN** the Rerun button is visible and enabled
+
+#### Scenario: Rerun button hidden for active job
+
+- **WHEN** user views a job with status `queued`, `cloning`, `running`, or `pushing`
+- **THEN** the Rerun button is not displayed
+
+#### Scenario: Successful rerun navigation
+
+- **WHEN** user clicks the Rerun button
+- **THEN** the system calls the rerun API and navigates to the new job's detail page
+
+#### Scenario: Rerun blocked by duplicate
+
+- **WHEN** user clicks the Rerun button but the API returns HTTP 409
+- **THEN** the system displays an error message indicating a duplicate active job exists
+
+
+<!-- @trace
+source: job-rerun
+updated: 2026-03-20
+code:
+  - frontend/src/api.js
+  - backend/db.py
+  - backend/jirara.db
+  - backend/services/queue.py
+  - backend/routers/jobs.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+  - frontend/src/app.css
+  - backend/models/job.py
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+-->
+
+---
+### Requirement: Rerun chain navigation
+
+The JobDetail page SHALL display the current run number and provide navigation links to previous and next runs in the rerun chain.
+
+#### Scenario: First run with no reruns
+
+- **WHEN** user views a job that has no parent and no children
+- **THEN** no chain navigation is displayed
+
+#### Scenario: Rerun job shows run number and parent link
+
+- **WHEN** user views a rerun job (has `parent_job_id`)
+- **THEN** the page displays the run number (e.g., "Run #2") and a link to the previous run
+
+#### Scenario: Parent job with child shows next link
+
+- **WHEN** user views a job that has been rerun (another job references it as parent)
+- **THEN** the page displays a link to the next run
+
+
+<!-- @trace
+source: job-rerun
+updated: 2026-03-20
+code:
+  - frontend/src/api.js
+  - backend/db.py
+  - backend/jirara.db
+  - backend/services/queue.py
+  - backend/routers/jobs.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+  - frontend/src/app.css
+  - backend/models/job.py
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+-->
+
+---
+### Requirement: Rerun API client function
+
+The frontend API client (`api.js`) SHALL include a `rerunJob(jobId)` function that calls `POST /api/v1/jobs/{id}/rerun` and returns the new job response.
+
+#### Scenario: API client rerun call
+
+- **WHEN** `rerunJob(jobId)` is called
+- **THEN** it sends an authenticated POST request to `/api/v1/jobs/{jobId}/rerun` and returns the parsed response
+
+<!-- @trace
+source: job-rerun
+updated: 2026-03-20
+code:
+  - frontend/src/api.js
+  - backend/db.py
+  - backend/jirara.db
+  - backend/services/queue.py
+  - backend/routers/jobs.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+  - frontend/src/app.css
+  - backend/models/job.py
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+-->
+
+---
+### Requirement: MCP and Skill log line colors
+
+The log viewer SHALL render log entries with `event_type` = `mcp` in cyan (`#5ec4d0`) and entries with `event_type` = `skill` in gold (`#e0a854`), with corresponding colored tag labels.
+
+#### Scenario: MCP log line color
+
+- **WHEN** a log entry with `event_type` = `mcp` is rendered in the log viewer
+- **THEN** the log line text SHALL be cyan (`#5ec4d0`) and the tag label SHALL display `MCP` with a cyan background
+
+#### Scenario: Skill log line color
+
+- **WHEN** a log entry with `event_type` = `skill` is rendered in the log viewer
+- **THEN** the log line text SHALL be gold (`#e0a854`) and the tag label SHALL display `SKL` with a gold background
+
+
+<!-- @trace
+source: log-summary-and-theme
+updated: 2026-03-20
+code:
+  - backend/services/queue.py
+  - frontend/src/api.js
+  - backend/models/job.py
+  - backend/db.py
+  - frontend/src/app.css
+  - backend/jirara.db
+  - backend/routers/jobs.py
+  - backend/services/executor.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_emit_summary.py
+  - backend/tests/test_event_classify.py
+-->
+
+---
+### Requirement: Log filter includes MCP and Skill options
+
+The log viewer filter buttons SHALL include MCP and Skill options in addition to the existing All, Assistant, Tools, and System filters.
+
+#### Scenario: MCP filter active
+
+- **WHEN** the user clicks the MCP filter button
+- **THEN** only log entries with `event_type` = `mcp` SHALL be displayed
+
+#### Scenario: Skill filter active
+
+- **WHEN** the user clicks the Skill filter button
+- **THEN** only log entries with `event_type` = `skill` SHALL be displayed
+
+<!-- @trace
+source: log-summary-and-theme
+updated: 2026-03-20
+code:
+  - backend/services/queue.py
+  - frontend/src/api.js
+  - backend/models/job.py
+  - backend/db.py
+  - frontend/src/app.css
+  - backend/jirara.db
+  - backend/routers/jobs.py
+  - backend/services/executor.py
+  - frontend/src/pages/JobDetail.vue
+  - .env.example
+tests:
+  - backend/tests/test_rerun_api.py
+  - backend/tests/test_rerun_db.py
+  - backend/tests/test_rerun_models.py
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_emit_summary.py
+  - backend/tests/test_event_classify.py
+-->
