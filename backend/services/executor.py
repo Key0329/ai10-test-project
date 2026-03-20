@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import shutil
 import signal
 from datetime import datetime, timezone
@@ -102,12 +103,19 @@ async def _update_status(job_id: str, status: str, **kwargs):
         await db.close()
 
 
-def _extract_display_message(event_type: str, parsed: dict) -> str | None:
-    """Extract a human-readable message from a stream-json event."""
+def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | None]:
+    """Extract a human-readable message and refined event_type from a stream-json event.
+
+    Returns (refined_event_type, display_message).
+    For assistant events with MCP/Skill tool_use, event_type is refined
+    with priority: mcp > skill > assistant.
+    """
     if event_type == "assistant":
         msg = parsed.get("message", {})
         contents = msg.get("content", []) if isinstance(msg, dict) else []
         parts = []
+        has_mcp = False
+        has_skill = False
         for block in contents:
             if block.get("type") == "text":
                 parts.append(block.get("text", ""))
@@ -117,28 +125,37 @@ def _extract_display_message(event_type: str, parsed: dict) -> str | None:
                 desc = inp.get("description", inp.get("command", inp.get("pattern", "")))
                 if isinstance(desc, str) and len(desc) > 120:
                     desc = desc[:120] + "..."
-                parts.append(f"[tool] {name}: {desc}" if desc else f"[tool] {name}")
-        return "\n".join(parts) if parts else None
+                if name.startswith("mcp__"):
+                    has_mcp = True
+                    prefix = "[mcp]"
+                elif name == "Skill":
+                    has_skill = True
+                    prefix = "[skill]"
+                else:
+                    prefix = "[tool]"
+                parts.append(f"{prefix} {name}: {desc}" if desc else f"{prefix} {name}")
+        refined = "mcp" if has_mcp else "skill" if has_skill else "assistant"
+        return refined, "\n".join(parts) if parts else None
     if event_type == "user":
         result = parsed.get("tool_use_result", "")
         if isinstance(result, dict):
             result = result.get("stdout", "") or result.get("stderr", "")
         if isinstance(result, str) and len(result) > 200:
             result = result[:200] + "..."
-        return result or None
+        return event_type, result or None
     if event_type == "system":
         subtype = parsed.get("subtype", "")
         if subtype == "init":
             model = parsed.get("model", "?")
-            return f"Session initialized (model: {model})"
-        return parsed.get("message", None)
+            return event_type, f"Session initialized (model: {model})"
+        return event_type, parsed.get("message", None)
     if event_type == "result":
         subtype = parsed.get("subtype", "")
         result_text = parsed.get("result", "")
         if isinstance(result_text, str) and len(result_text) > 300:
             result_text = result_text[:300] + "..."
-        return f"[{subtype}] {result_text}" if result_text else None
-    return None
+        return event_type, f"[{subtype}] {result_text}" if result_text else None
+    return event_type, None
 
 
 async def _stream_output(job_id: str, stream_name: str, stream):
@@ -154,12 +171,89 @@ async def _stream_output(job_id: str, stream_name: str, stream):
             parsed = json.loads(text)
             event_type = parsed.get("type") if isinstance(parsed, dict) else None
             if event_type:
-                display = _extract_display_message(event_type, parsed) or f"[{event_type}]"
-                await _log(job_id, stream_name, display, event_type=event_type, metadata=text)
+                refined_type, display = _extract_display_message(event_type, parsed)
+                display = display or f"[{event_type}]"
+                await _log(job_id, stream_name, display, event_type=refined_type, metadata=text)
             else:
                 await _log(job_id, stream_name, text)
         except (json.JSONDecodeError, ValueError):
             await _log(job_id, stream_name, text)
+
+
+async def _emit_summary(job_id: str):
+    """Emit an execution summary log with token/cost/MCP/skills data."""
+    db = await get_db()
+    try:
+        # 1. Find result event metadata
+        cursor = await db.execute(
+            "SELECT metadata FROM job_logs WHERE job_id = ? AND event_type = 'result' ORDER BY id DESC LIMIT 1",
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+        if not row or not row["metadata"]:
+            return  # No result event — skip summary
+
+        try:
+            result_data = json.loads(row["metadata"])
+        except (json.JSONDecodeError, TypeError):
+            return
+
+        # 2. Parse token/cost data
+        usage = result_data.get("usage", {})
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        cache_read = usage.get("cache_read_input_tokens")
+        cost = result_data.get("total_cost_usd")
+        turns = result_data.get("num_turns")
+
+        def _fmt(val):
+            if val is None:
+                return "N/A"
+            if isinstance(val, float):
+                return f"{val:.4f}"
+            return f"{val:,}" if isinstance(val, int) else str(val)
+
+        # 3. Collect MCP server names
+        cursor = await db.execute(
+            "SELECT message FROM job_logs WHERE job_id = ? AND event_type = 'mcp'",
+            (job_id,),
+        )
+        mcp_rows = await cursor.fetchall()
+        mcp_servers = set()
+        for r in mcp_rows:
+            match = re.search(r"mcp__(\w+)__", r["message"])
+            if match:
+                mcp_servers.add(match.group(1))
+        mcp_str = ", ".join(sorted(mcp_servers)) if mcp_servers else "(none)"
+
+        # 4. Collect skill names
+        cursor = await db.execute(
+            "SELECT message FROM job_logs WHERE job_id = ? AND event_type = 'skill'",
+            (job_id,),
+        )
+        skill_rows = await cursor.fetchall()
+        skills = set()
+        for r in skill_rows:
+            match = re.search(r"\[skill\] Skill:\s*(\S+)", r["message"])
+            if match:
+                skills.add(match.group(1))
+        skills_str = ", ".join(sorted(skills)) if skills else "(none)"
+
+        # 5. Build summary
+        summary = (
+            f"────── 執行摘要 ──────\n"
+            f"Token：input {_fmt(input_tokens)} / output {_fmt(output_tokens)}"
+            f" / cache read {_fmt(cache_read)}\n"
+            f"成本：${_fmt(cost)}\n"
+            f"Turns：{_fmt(turns)}\n"
+            f"MCP：{mcp_str}\n"
+            f"Skills：{skills_str}\n"
+            f"──────────────────────"
+        )
+
+        await _log(job_id, "system", summary, event_type="system")
+    finally:
+        await db.close()
 
 
 async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
@@ -244,6 +338,9 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
 
         exit_code = proc.returncode
         await _log(job_id, "system", f"Claude exited with code {exit_code}")
+
+        # Emit execution summary before final status update
+        await _emit_summary(job_id)
 
         if exit_code == 0:
             await _update_status(
