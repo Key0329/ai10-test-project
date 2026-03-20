@@ -256,6 +256,17 @@ async def _emit_summary(job_id: str):
         await db.close()
 
 
+def _cleanup_workdir(work_dir: str) -> bool:
+    """Delete work directory. Returns True on success, False on failure. Non-fatal."""
+    if not os.path.exists(work_dir):
+        return True
+    try:
+        shutil.rmtree(work_dir)
+        return True
+    except Exception:
+        return False
+
+
 async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
                       branch: str | None, extra_prompt: str | None):
     """Full execution: clone → claude -p → report result."""
@@ -363,3 +374,6 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
             error_message=str(e),
             finished_at=datetime.now(timezone.utc).isoformat(),
         )
+    finally:
+        if not _cleanup_workdir(work_dir):
+            await _log(job_id, "system", f"Warning: failed to clean up {work_dir}")
