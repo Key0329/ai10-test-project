@@ -63,6 +63,14 @@ export function streamLogs(jobId, onLog, onDone) {
   return () => es.close();
 }
 
+export async function rerunJob(jobId) {
+  return request(`/jobs/${jobId}/rerun`, { method: 'POST' });
+}
+
+export async function getJobChain(jobId) {
+  return request(`/jobs/${jobId}/chain`);
+}
+
 export async function healthCheck() {
   return request('/health');
 }

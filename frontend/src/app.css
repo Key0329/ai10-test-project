@@ -1,12 +1,12 @@
 :root {
-  --bg: #f8f7f4;
-  --surface: #ffffff;
-  --surface-hover: #f5f4f1;
-  --border: #e8e5df;
-  --border-hover: #d4d0c8;
+  --bg: #e8ecf1;
+  --surface: #f4f6f9;
+  --surface-hover: #eaedf2;
+  --border: #d0d5dd;
+  --border-hover: #b8bfc9;
   --text: #1a1a1a;
-  --text-dim: #6b6560;
-  --text-hint: #a09890;
+  --text-dim: #5a6270;
+  --text-hint: #8a92a0;
   --accent: #0d7377;
   --green: #2d6a4f;
   --amber: #9a6700;
@@ -94,6 +94,20 @@ body {
   background: transparent; border-color: var(--border); color: var(--red);
 }
 .btn-danger:hover { background: var(--surface-hover); border-color: var(--border-hover); }
+.btn-rerun {
+  width: auto; padding: 4px 14px; font-size: 12px;
+  background: var(--blue); border-color: var(--blue); color: #fff;
+}
+.btn-rerun:hover { background: #5a8dbf; border-color: #5a8dbf; }
+
+/* ─── Chain Nav ─── */
+.chain-nav {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  font-size: 12px; color: var(--text-dim);
+}
+.chain-link { color: var(--blue); text-decoration: none; }
+.chain-link:hover { text-decoration: underline; }
+.chain-current { font-weight: 600; color: var(--text); }
 
 /* ─── Cards ─── */
 .card {
@@ -180,6 +194,8 @@ body {
 .log-line-stderr { color: #d4a656; }
 .log-line-error { color: #e06c60; }
 .log-line-system { color: #6eb0d4; }
+.log-line-mcp { color: #5ec4d0; }
+.log-line-skill { color: #e0a854; }
 .log-tag {
   display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 5px;
   border-radius: 2px; color: #1a1b1e; flex-shrink: 0; min-width: 36px;

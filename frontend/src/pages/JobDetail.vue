@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getJob, cancelJob, streamLogs } from '../api'
+import { getJob, cancelJob, streamLogs, rerunJob, getJobChain } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const router = useRouter()
@@ -11,6 +11,8 @@ const FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
   { key: 'assistant', label: 'Assistant' },
   { key: 'tool', label: 'Tools' },
+  { key: 'mcp', label: 'MCP' },
+  { key: 'skill', label: 'Skill' },
   { key: 'system', label: 'System' },
 ]
 
@@ -23,6 +25,8 @@ const logs = ref([])
 const error = ref('')
 const filter = ref('all')
 const logEl = ref(null)
+const chain = ref([])
+const rerunLoading = ref(false)
 let stopStream = null
 let pollInterval = null
 
@@ -30,12 +34,34 @@ const isActive = computed(() =>
   job.value && ['queued', 'cloning', 'running', 'pushing'].includes(job.value.status)
 )
 
+const canRerun = computed(() =>
+  job.value && ['completed', 'failed', 'cancelled'].includes(job.value.status)
+)
+
+const runNumber = computed(() => {
+  if (!chain.value.length) return null
+  const idx = chain.value.findIndex(c => c.job_id === props.id)
+  return idx >= 0 ? idx + 1 : null
+})
+
+const prevRun = computed(() => {
+  if (!chain.value.length || !runNumber.value || runNumber.value <= 1) return null
+  return chain.value[runNumber.value - 2]
+})
+
+const nextRun = computed(() => {
+  if (!chain.value.length || !runNumber.value || runNumber.value >= chain.value.length) return null
+  return chain.value[runNumber.value]
+})
+
 const filteredLogs = computed(() => logs.value.filter(matchesFilter))
 
 function matchesFilter(entry) {
   if (filter.value === 'all') return true
   if (filter.value === 'assistant') return entry.event_type === 'assistant'
   if (filter.value === 'tool') return entry.event_type === 'tool_use' || entry.event_type === 'tool_result'
+  if (filter.value === 'mcp') return entry.event_type === 'mcp'
+  if (filter.value === 'skill') return entry.event_type === 'skill'
   if (filter.value === 'system') return entry.stream === 'system' || entry.stream === 'error'
   return true
 }
@@ -44,6 +70,8 @@ function lineClass(entry) {
   if (entry.stream === 'error') return 'log-line log-line-error'
   if (entry.stream === 'stderr') return 'log-line log-line-stderr'
   if (entry.stream === 'system') return 'log-line log-line-system'
+  if (entry.event_type === 'mcp') return 'log-line log-line-mcp'
+  if (entry.event_type === 'skill') return 'log-line log-line-skill'
   if (entry.event_type === 'assistant') return 'log-line log-line-assistant'
   if (entry.event_type === 'user') return 'log-line log-line-tool-result'
   if (entry.event_type === 'result') return 'log-line log-line-result'
@@ -53,6 +81,8 @@ function lineClass(entry) {
 function tagLabel(entry) {
   if (entry.stream === 'system') return 'SYS'
   if (entry.stream === 'error') return 'ERR'
+  if (entry.event_type === 'mcp') return 'MCP'
+  if (entry.event_type === 'skill') return 'SKL'
   if (entry.event_type === 'assistant') return 'AI'
   if (entry.event_type === 'user') return 'TOOL'
   if (entry.event_type === 'system') return 'INIT'
@@ -63,6 +93,8 @@ function tagLabel(entry) {
 function tagColor(entry) {
   if (entry.stream === 'error') return '#c4736d'
   if (entry.stream === 'system') return '#75736e'
+  if (entry.event_type === 'mcp') return '#4aafb5'
+  if (entry.event_type === 'skill') return '#c99040'
   if (entry.event_type === 'assistant') return '#7ba3c9'
   if (entry.event_type === 'user') return '#9b8dbd'
   if (entry.event_type === 'system') return '#75736e'
@@ -97,29 +129,52 @@ async function handleCancel() {
   }
 }
 
-watch(isActive, (active, prevActive) => {
-  if (active && !stopStream) {
-    stopStream = streamLogs(
-      props.id,
-      (entry) => {
-        logs.value.push(entry)
-        if (logEl.value) {
-          requestAnimationFrame(() => {
-            logEl.value.scrollTop = logEl.value.scrollHeight
-          })
-        }
-      },
-      () => { stopStream = null }
-    )
+async function handleRerun() {
+  rerunLoading.value = true
+  error.value = ''
+  try {
+    const newJob = await rerunJob(props.id)
+    router.push(`/jobs/${newJob.job_id}`)
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    rerunLoading.value = false
   }
-  if (!active && stopStream) {
-    stopStream()
-    stopStream = null
+}
+
+async function loadChain() {
+  try {
+    chain.value = await getJobChain(props.id)
+  } catch {
+    chain.value = []
+  }
+}
+
+function startStream() {
+  if (stopStream) return
+  stopStream = streamLogs(
+    props.id,
+    (entry) => {
+      logs.value.push(entry)
+      if (logEl.value) {
+        requestAnimationFrame(() => {
+          logEl.value.scrollTop = logEl.value.scrollHeight
+        })
+      }
+    },
+    () => { stopStream = null }
+  )
+}
+
+watch(() => job.value, (j) => {
+  if (j && !stopStream) {
+    startStream()
   }
 })
 
 onMounted(() => {
   loadJob()
+  loadChain()
   pollInterval = setInterval(loadJob, 3000)
 })
 
@@ -138,12 +193,28 @@ onUnmounted(() => {
   <div v-else-if="job">
     <button class="back-btn" @click="router.push('/')">← Back to Dashboard</button>
 
+    <div v-if="chain.length > 1" class="chain-nav">
+      <router-link v-if="prevRun" :to="`/jobs/${prevRun.job_id}`" class="chain-link">← Run #{{ runNumber - 1 }}</router-link>
+      <span class="chain-current">Run #{{ runNumber }} / {{ chain.length }}</span>
+      <router-link v-if="nextRun" :to="`/jobs/${nextRun.job_id}`" class="chain-link">Run #{{ runNumber + 1 }} →</router-link>
+    </div>
+
     <div class="detail-header" style="margin-top: 12px">
       <div style="display: flex; align-items: center; gap: 12px">
         <span class="detail-ticket">{{ job.jira_ticket }}</span>
         <StatusBadge :status="job.status" />
       </div>
-      <div style="font-size: 12px; color: var(--text-dim)">{{ elapsed() }}</div>
+      <div style="display: flex; align-items: center; gap: 8px">
+        <div style="font-size: 12px; color: var(--text-dim)">{{ elapsed() }}</div>
+        <button
+          v-if="canRerun"
+          class="btn btn-rerun"
+          :disabled="rerunLoading"
+          @click="handleRerun"
+        >
+          {{ rerunLoading ? 'Rerunning...' : 'Rerun' }}
+        </button>
+      </div>
     </div>
 
     <div class="detail-meta">

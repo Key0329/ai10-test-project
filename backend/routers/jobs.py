@@ -15,6 +15,29 @@ from services.queue import cancel_job
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
 
+def _row_to_response(r, **overrides) -> JobResponse:
+    """Convert a DB row to JobResponse, with optional field overrides."""
+    data = {
+        "job_id": r["id"],
+        "repo_url": r["repo_url"],
+        "jira_ticket": r["jira_ticket"],
+        "branch": r["branch"],
+        "extra_prompt": r["extra_prompt"],
+        "priority": r["priority"],
+        "requested_by": r["requested_by"],
+        "status": r["status"],
+        "exit_code": r["exit_code"],
+        "pr_url": r["pr_url"],
+        "error_message": r["error_message"],
+        "created_at": r["created_at"],
+        "started_at": r["started_at"],
+        "finished_at": r["finished_at"],
+        "parent_job_id": r["parent_job_id"],
+    }
+    data.update(overrides)
+    return JobResponse(**data)
+
+
 @router.post("", status_code=202, response_model=JobResponse)
 async def create_job(payload: JobCreate):
     """Create a new development job."""
@@ -117,22 +140,7 @@ async def list_jobs(
         await db.close()
 
     jobs = [
-        JobResponse(
-            job_id=r["id"],
-            repo_url=r["repo_url"],
-            jira_ticket=r["jira_ticket"],
-            branch=r["branch"],
-            extra_prompt=r["extra_prompt"],
-            priority=r["priority"],
-            requested_by=r["requested_by"],
-            status=r["status"],
-            exit_code=r["exit_code"],
-            pr_url=r["pr_url"],
-            error_message=r["error_message"],
-            created_at=r["created_at"],
-            started_at=r["started_at"],
-            finished_at=r["finished_at"],
-        )
+        _row_to_response(r)
         for r in rows
     ]
 
@@ -151,22 +159,55 @@ async def get_job(job_id: str):
     finally:
         await db.close()
 
-    return JobResponse(
-        job_id=r["id"],
-        repo_url=r["repo_url"],
-        jira_ticket=r["jira_ticket"],
-        branch=r["branch"],
-        extra_prompt=r["extra_prompt"],
-        priority=r["priority"],
-        requested_by=r["requested_by"],
-        status=r["status"],
-        exit_code=r["exit_code"],
-        pr_url=r["pr_url"],
-        error_message=r["error_message"],
-        created_at=r["created_at"],
-        started_at=r["started_at"],
-        finished_at=r["finished_at"],
-    )
+    return _row_to_response(r)
+
+
+@router.get("/{job_id}/chain")
+async def get_chain(job_id: str):
+    """Get the full rerun chain for a job."""
+    db = await get_db()
+    try:
+        return await _get_chain_impl(job_id, db)
+    finally:
+        await db.close()
+
+
+async def _get_chain_impl(job_id: str, db) -> list[dict]:
+    """Get ordered rerun chain (first to latest) for any job in the chain."""
+    cursor = await db.execute("SELECT id FROM jobs WHERE id = ?", (job_id,))
+    if not await cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Walk up to find the root (first job with no parent)
+    current_id = job_id
+    while True:
+        cursor = await db.execute(
+            "SELECT parent_job_id FROM jobs WHERE id = ?", (current_id,)
+        )
+        row = await cursor.fetchone()
+        if not row or not row["parent_job_id"]:
+            break
+        current_id = row["parent_job_id"]
+
+    # Walk down from root collecting the chain
+    chain = []
+    visit_id = current_id
+    while visit_id:
+        cursor = await db.execute(
+            "SELECT id, status FROM jobs WHERE id = ?", (visit_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            break
+        chain.append({"job_id": row["id"], "status": row["status"]})
+        # Find child
+        cursor = await db.execute(
+            "SELECT id FROM jobs WHERE parent_job_id = ?", (visit_id,)
+        )
+        child = await cursor.fetchone()
+        visit_id = child["id"] if child else None
+
+    return chain
 
 
 @router.get("/{job_id}/logs")
@@ -219,6 +260,92 @@ async def stream_logs(job_id: str):
             await asyncio.sleep(1)
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/{job_id}/rerun", status_code=202, response_model=JobResponse)
+async def rerun_job(job_id: str):
+    """Rerun a completed or failed job by creating a new job with the same parameters."""
+    db = await get_db()
+    try:
+        return await _rerun_job_impl(job_id, db)
+    finally:
+        await db.close()
+
+
+async def _rerun_job_impl(job_id: str, db) -> JobResponse:
+    """Core rerun logic, extracted for testability."""
+    cursor = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    original = await cursor.fetchone()
+    if not original:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    active_statuses = ("queued", "cloning", "running", "pushing")
+    if original["status"] in active_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is still active (status: {original['status']}). Cannot rerun.",
+        )
+
+    # Check for duplicate active job with same ticket
+    cursor = await db.execute(
+        """SELECT id FROM jobs
+           WHERE jira_ticket = ? AND status IN ('queued', 'cloning', 'running', 'pushing')""",
+        (original["jira_ticket"],),
+    )
+    existing = await cursor.fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ticket {original['jira_ticket']} already has an active job: {existing['id']}",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    new_job_id = f"{original['jira_ticket']}-{int(datetime.now(timezone.utc).timestamp())}"
+
+    await db.execute(
+        """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
+                            priority, requested_by, status, parent_job_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)""",
+        (
+            new_job_id,
+            original["repo_url"],
+            original["jira_ticket"],
+            original["branch"],
+            original["extra_prompt"],
+            original["priority"],
+            original["requested_by"],
+            job_id,
+            now,
+        ),
+    )
+    await db.commit()
+
+    cursor = await db.execute(
+        """SELECT COUNT(*) as pos FROM jobs
+           WHERE status = 'queued'
+           AND (priority < ? OR (priority = ? AND created_at < ?))""",
+        (original["priority"], original["priority"], now),
+    )
+    pos_row = await cursor.fetchone()
+
+    return JobResponse(
+        job_id=new_job_id,
+        repo_url=original["repo_url"],
+        jira_ticket=original["jira_ticket"],
+        branch=original["branch"],
+        extra_prompt=original["extra_prompt"],
+        priority=original["priority"],
+        requested_by=original["requested_by"],
+        status="queued",
+        exit_code=None,
+        pr_url=None,
+        error_message=None,
+        created_at=now,
+        started_at=None,
+        finished_at=None,
+        parent_job_id=job_id,
+        position=pos_row["pos"] + 1,
+    )
 
 
 @router.post("/{job_id}/cancel")

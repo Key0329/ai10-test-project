@@ -53,6 +53,7 @@ class JobResponse(BaseModel):
     created_at: str
     started_at: Optional[str]
     finished_at: Optional[str]
+    parent_job_id: Optional[str] = None
     position: Optional[int] = None
 
 
