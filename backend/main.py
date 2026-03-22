@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from db import init_db
 from routers import jobs, callback
+from services.scheduler import start_log_cleaner
 # from services.queue import start_queue_worker, stop_queue_worker  # 暫時停用 queue worker
 
 # ─── Logging ───────────────────────────────────────────────────────
@@ -34,6 +35,9 @@ async def lifespan(app: FastAPI):
     # queue_task = asyncio.create_task(start_queue_worker())  # 暫時停用：job 直接執行不透過 queue
     # logger.info("Queue worker started")
 
+    cleaner_task = asyncio.create_task(start_log_cleaner())
+    logger.info("Log cleaner scheduled")
+
     yield
 
     # stop_queue_worker()                                      # 暫時停用：queue worker 關閉
@@ -42,6 +46,11 @@ async def lifespan(app: FastAPI):
     #     await queue_task
     # except asyncio.CancelledError:
     #     pass
+    cleaner_task.cancel()
+    try:
+        await cleaner_task
+    except asyncio.CancelledError:
+        pass
     logger.info("Shutdown complete")
 
 

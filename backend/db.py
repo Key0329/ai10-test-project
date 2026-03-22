@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     extra_prompt TEXT DEFAULT '',
     priority INTEGER DEFAULT 3,
     requested_by TEXT DEFAULT '',
+    agent_mode TEXT DEFAULT 'claude_code',
     status TEXT DEFAULT 'queued',
     exit_code INTEGER,
     pr_url TEXT,
@@ -66,6 +67,14 @@ async def _migrate_jobs_parent(db):
         await db.execute("ALTER TABLE jobs ADD COLUMN parent_job_id TEXT")
 
 
+async def _migrate_jobs_agent_mode(db):
+    """Add agent_mode column to jobs table if missing (backward-compatible)."""
+    cursor = await db.execute("PRAGMA table_info(jobs)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "agent_mode" not in columns:
+        await db.execute("ALTER TABLE jobs ADD COLUMN agent_mode TEXT DEFAULT 'claude_code'")
+
+
 async def init_db():
     db = await get_db()
     try:
@@ -73,6 +82,7 @@ async def init_db():
         await db.execute(CREATE_LOGS_TABLE)
         await _migrate_job_logs(db)
         await _migrate_jobs_parent(db)
+        await _migrate_jobs_agent_mode(db)
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
         )

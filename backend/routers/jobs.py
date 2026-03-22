@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 from db import get_db
 from models.job import JobCreate, JobResponse, JobListResponse, RerunRequest
 from services.executor import execute_job
+from services.copilot_executor import execute_copilot_job
 from services.queue import cancel_job, _running_tasks, _on_task_done
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -26,6 +27,7 @@ def _row_to_response(r, **overrides) -> JobResponse:
         "extra_prompt": r["extra_prompt"],
         "priority": r["priority"],
         "requested_by": r["requested_by"],
+        "agent_mode": r["agent_mode"] if r["agent_mode"] else "claude_code",
         "status": r["status"],
         "exit_code": r["exit_code"],
         "pr_url": r["pr_url"],
@@ -62,8 +64,8 @@ async def create_job(payload: JobCreate):
 
         await db.execute(
             """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                                priority, requested_by, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
+                                priority, requested_by, agent_mode, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
             (
                 job_id,
                 payload.repo_url,
@@ -72,6 +74,7 @@ async def create_job(payload: JobCreate):
                 payload.extra_prompt,
                 payload.priority,
                 payload.requested_by,
+                payload.agent_mode,
                 now,
             ),
         )
@@ -89,18 +92,20 @@ async def create_job(payload: JobCreate):
         await db.close()
 
     # 直接執行，不透過 queue worker（queue worker 已暫時停用）
-    task = asyncio.create_task(
-        execute_job(
-            job_id=job_id,
-            repo_url=payload.repo_url,
-            jira_ticket=payload.jira_ticket,
-            branch=payload.branch,
-            extra_prompt=payload.extra_prompt,
-            github_token=payload.github_token,
-            jira_api_token=payload.jira_api_token,
-            jira_email=payload.jira_email,
-        )
+    executor_kwargs = dict(
+        job_id=job_id,
+        repo_url=payload.repo_url,
+        jira_ticket=payload.jira_ticket,
+        branch=payload.branch,
+        extra_prompt=payload.extra_prompt,
+        github_token=payload.github_token,
+        jira_api_token=payload.jira_api_token,
+        jira_email=payload.jira_email,
     )
+    if payload.agent_mode == "copilot":
+        task = asyncio.create_task(execute_copilot_job(**executor_kwargs))
+    else:
+        task = asyncio.create_task(execute_job(**executor_kwargs))
     task.add_done_callback(lambda t, j=job_id: _on_task_done(j, t))
     _running_tasks[job_id] = task
 
@@ -112,6 +117,7 @@ async def create_job(payload: JobCreate):
         extra_prompt=payload.extra_prompt,
         priority=payload.priority,
         requested_by=payload.requested_by,
+        agent_mode=payload.agent_mode,
         status="queued",
         exit_code=None,
         pr_url=None,
@@ -319,10 +325,12 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
     now = datetime.now(timezone.utc).isoformat()
     new_job_id = f"{original['jira_ticket']}-{int(datetime.now(timezone.utc).timestamp())}"
 
+    original_agent_mode = original["agent_mode"] if original["agent_mode"] else "claude_code"
+
     await db.execute(
         """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                            priority, requested_by, status, parent_job_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)""",
+                            priority, requested_by, agent_mode, status, parent_job_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)""",
         (
             new_job_id,
             original["repo_url"],
@@ -331,6 +339,7 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
             original["extra_prompt"],
             original["priority"],
             original["requested_by"],
+            original_agent_mode,
             job_id,
             now,
         ),
@@ -346,18 +355,21 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
     pos_row = await cursor.fetchone()
 
     # 直接執行，不透過 queue worker（queue worker 已暫時停用）
-    task = asyncio.create_task(
-        execute_job(
-            job_id=new_job_id,
-            repo_url=original["repo_url"],
-            jira_ticket=original["jira_ticket"],
-            branch=original["branch"],
-            extra_prompt=original["extra_prompt"],
-            github_token=payload.github_token,
-            jira_api_token=payload.jira_api_token,
-            jira_email=payload.jira_email,
-        )
+    # rerun 沿用原始 job 的 agent_mode
+    rerun_kwargs = dict(
+        job_id=new_job_id,
+        repo_url=original["repo_url"],
+        jira_ticket=original["jira_ticket"],
+        branch=original["branch"],
+        extra_prompt=original["extra_prompt"],
+        github_token=payload.github_token,
+        jira_api_token=payload.jira_api_token,
+        jira_email=payload.jira_email,
     )
+    if original_agent_mode == "copilot":
+        task = asyncio.create_task(execute_copilot_job(**rerun_kwargs))
+    else:
+        task = asyncio.create_task(execute_job(**rerun_kwargs))
     task.add_done_callback(lambda t, j=new_job_id: _on_task_done(j, t))
     _running_tasks[new_job_id] = task
 
@@ -369,6 +381,7 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
         extra_prompt=original["extra_prompt"],
         priority=original["priority"],
         requested_by=original["requested_by"],
+        agent_mode=original_agent_mode,
         status="queued",
         exit_code=None,
         pr_url=None,

@@ -20,6 +20,7 @@ const form = reactive({
   extra_prompt: '',
   priority: 3,
   requested_by: localStorage.getItem('cra_user') || '',
+  agent_mode: 'claude_code',
 })
 const submitting = ref(false)
 const error = ref('')
@@ -49,6 +50,7 @@ async function handleSubmit() {
       extra_prompt: form.extra_prompt || undefined,
       priority: form.priority,
       requested_by: form.requested_by || undefined,
+      agent_mode: form.agent_mode,
       github_token: credentials.github_token,
       jira_api_token: credentials.jira_api_token,
       jira_email: credentials.jira_email,
@@ -72,6 +74,23 @@ async function handleSubmit() {
       <div v-if="error" class="alert alert-error">{{ error }}</div>
 
       <form @submit.prevent="handleSubmit">
+        <div class="form-group">
+          <label class="form-label">Execution Engine</label>
+          <div style="display: flex; gap: 10px; margin-top: 4px">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--agent-mode-claude, transparent)" :style="form.agent_mode === 'claude_code' ? 'border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent)' : ''">
+              <input type="radio" v-model="form.agent_mode" value="claude_code" style="accent-color: var(--accent)" />
+              <span>Claude Code</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border)" :style="form.agent_mode === 'copilot' ? 'border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent)' : ''">
+              <input type="radio" v-model="form.agent_mode" value="copilot" style="accent-color: var(--accent)" />
+              <span>Copilot</span>
+            </label>
+          </div>
+          <div v-if="form.agent_mode === 'copilot'" style="margin-top: 6px; font-size: 12px; color: var(--text-hint)">
+            需要 target repo 有 .github/skills/jirara/ 與 GitHub Copilot 已登入
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Repository URL *</label>
           <template v-if="DEFAULT_REPOS.length > 0">

@@ -20,7 +20,30 @@ FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "sonnet")
 os.makedirs(WORKSPACE, exist_ok=True)
 
 
-def build_prompt(jira_ticket: str, extra_prompt: str | None) -> str:
+async def _resolve_base_branch(work_dir: str, requested_branch: str | None) -> str:
+    """決定 PR 的 base branch：使用者指定 > dev > lab > main。
+    clone 後透過 git branch -r 確認 remote 分支是否存在。
+    """
+    if requested_branch:
+        return requested_branch
+
+    # 使用 list form 避免 shell injection
+    proc = await asyncio.create_subprocess_exec(
+        "git", "-C", work_dir, "branch", "-r",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    remote_branches = stdout.decode()
+
+    for candidate in ("dev", "lab", "main", "master"):
+        if f"origin/{candidate}" in remote_branches:
+            return candidate
+
+    return "main"
+
+
+def build_prompt(jira_ticket: str, extra_prompt: str | None, base_branch: str = "dev") -> str:
     """Build the user prompt for Claude Code."""
     # 強制自主執行 + 嚴格遵守 repo 內規範
     autonomous_header = (
@@ -41,6 +64,7 @@ def build_prompt(jira_ticket: str, extra_prompt: str | None) -> str:
         "\n"
     )
     prompt = autonomous_header + f"請處理 Jira 單 {jira_ticket}"
+    prompt += f"\n\n【PR Base Branch】建立 PR 時，base branch 必須指定為 `{base_branch}`"
     if extra_prompt:
         prompt += f"\n\n額外指示：{extra_prompt}"
     return prompt
@@ -520,6 +544,8 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
     now = datetime.now(timezone.utc).isoformat()
 
     try:
+        await _log(job_id, "system", "🤖 執行引擎：Claude Code", event_type="system")
+
         # ── Step 1: Clone ──
         await _update_status(job_id, "cloning", started_at=now, work_dir=work_dir)
 
@@ -568,7 +594,9 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         if not claude_bin:
             raise RuntimeError("claude CLI not found in PATH")
 
-        prompt = build_prompt(jira_ticket, extra_prompt)
+        base_branch = await _resolve_base_branch(work_dir, branch)
+        await _log(job_id, "system", f"[PR base branch] {base_branch}")
+        prompt = build_prompt(jira_ticket, extra_prompt, base_branch)
         claude_cmd = build_claude_command(claude_bin, prompt)
 
         await _log(job_id, "system", f"Running claude -p in {work_dir}")

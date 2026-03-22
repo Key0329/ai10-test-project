@@ -1,7 +1,7 @@
 """Job data models."""
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 import re
 
@@ -13,6 +13,7 @@ class JobCreate(BaseModel):
     extra_prompt: Optional[str] = Field(None, max_length=2000)
     priority: int = Field(3, ge=1, le=5)
     requested_by: Optional[str] = Field(None, max_length=100)
+    agent_mode: Literal["claude_code", "copilot"] = Field("claude_code", description="Execution engine")
     # 憑證欄位：只用於本次執行，不寫入 DB
     github_token: str = Field(..., description="GitHub Personal Access Token")
     jira_api_token: str = Field(..., description="Jira API Token")
@@ -50,6 +51,7 @@ class JobResponse(BaseModel):
     extra_prompt: Optional[str]
     priority: int
     requested_by: Optional[str]
+    agent_mode: str = "claude_code"
     status: str
     exit_code: Optional[int]
     pr_url: Optional[str]

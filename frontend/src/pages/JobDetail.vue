@@ -255,6 +255,14 @@ onUnmounted(() => {
         <div class="meta-value">{{ job.branch || 'default' }}</div>
       </div>
       <div class="meta-item">
+        <div class="meta-label">Engine</div>
+        <div class="meta-value">
+          <span :style="job.agent_mode === 'copilot' ? 'color: var(--accent)' : ''">
+            {{ job.agent_mode === 'copilot' ? '⚡ Copilot' : '🤖 Claude Code' }}
+          </span>
+        </div>
+      </div>
+      <div class="meta-item">
         <div class="meta-label">Requested by</div>
         <div class="meta-value">{{ job.requested_by || '-' }}</div>
       </div>

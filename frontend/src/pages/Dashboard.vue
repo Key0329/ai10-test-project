@@ -174,6 +174,9 @@ onUnmounted(() => {
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px">
             <span style="font-weight: 600; font-size: 14px">{{ job.jira_ticket }}</span>
             <StatusBadge :status="job.status" />
+            <span style="font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--surface-alt, #2a2a2a); color: var(--text-hint)">
+              {{ job.agent_mode === 'copilot' ? '⚡ Copilot' : '🤖 Claude' }}
+            </span>
           </div>
           <div style="font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
             {{ job.repo_url.replace('https://github.com/', '') }}
