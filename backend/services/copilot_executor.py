@@ -277,6 +277,7 @@ async def execute_copilot_job(
     github_token: str = "",
     jira_api_token: str = "",
     jira_email: str = "",
+    mcp_config: dict | None = None,
 ):
     """對應 v3 AgentService.run()，整合 v4 的 logging / status 機制。"""
     if not _SDK_AVAILABLE:
@@ -375,7 +376,7 @@ async def execute_copilot_job(
         full_output: list[str] = []
 
         try:
-            session = await client.create_session(
+            session_config = dict(
                 model="claude-sonnet-4.6",
                 streaming=True,
                 working_directory=work_dir,
@@ -386,6 +387,15 @@ async def execute_copilot_job(
                 },
                 on_permission_request=PermissionHandler.approve_all,
             )
+
+            # 注入 MCP servers 設定（對應 v3 agent_action.py 相同邏輯）
+            if mcp_config:
+                session_config["mcp_servers"] = mcp_config
+                await _log(job_id, "system",
+                    f"[Copilot] 載入 MCP servers: {list(mcp_config.keys())}",
+                    event_type="system")
+
+            session = await client.create_session(**session_config)
 
             # ── v3 事件處理模式 ────────────────────────────────────────────────
             done = asyncio.Event()

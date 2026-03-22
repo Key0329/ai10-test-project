@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from db import init_db
-from routers import jobs, callback
+from routers import jobs, callback, mcp
 from services.scheduler import start_log_cleaner
 # from services.queue import start_queue_worker, stop_queue_worker  # 暫時停用 queue worker
 
@@ -65,6 +65,7 @@ app = FastAPI(
 # ─── Routes ────────────────────────────────────────────────────────
 app.include_router(jobs.router)
 app.include_router(callback.router)
+app.include_router(mcp.router)
 
 
 @app.get("/api/v1/health")

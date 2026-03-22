@@ -61,3 +61,14 @@ export async function getJobChain(jobId) {
 export async function healthCheck() {
   return request('/health');
 }
+
+export async function getMcpList() {
+  return request('/mcp/list');
+}
+
+export async function testMcpServers(selectedMcps, mcpTokens = {}) {
+  return request('/mcp/test', {
+    method: 'POST',
+    body: JSON.stringify({ selected_mcps: selectedMcps, mcp_tokens: mcpTokens }),
+  });
+}

@@ -14,6 +14,9 @@ class JobCreate(BaseModel):
     priority: int = Field(3, ge=1, le=5)
     requested_by: Optional[str] = Field(None, max_length=100)
     agent_mode: Literal["claude_code", "copilot"] = Field("claude_code", description="Execution engine")
+    # MCP 設定（僅 copilot 模式使用，不寫入 DB）
+    selected_mcps: list[str] = Field(default_factory=lambda: ["context7"], description="選擇的 MCP server ID 清單")
+    mcp_tokens: dict[str, str] = Field(default_factory=dict, description="各 MCP 的 token")
     # 憑證欄位：只用於本次執行，不寫入 DB
     github_token: str = Field(..., description="GitHub Personal Access Token")
     jira_api_token: str = Field(..., description="Jira API Token")

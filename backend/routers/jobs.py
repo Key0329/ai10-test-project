@@ -103,7 +103,12 @@ async def create_job(payload: JobCreate):
         jira_email=payload.jira_email,
     )
     if payload.agent_mode == "copilot":
-        task = asyncio.create_task(execute_copilot_job(**executor_kwargs))
+        # 建立 MCP session config 並傳入 copilot executor
+        from services.mcp import mcp_registry
+        mcp_config = mcp_registry.build_session_config(
+            payload.selected_mcps, payload.mcp_tokens
+        ) if payload.selected_mcps else {}
+        task = asyncio.create_task(execute_copilot_job(mcp_config=mcp_config, **executor_kwargs))
     else:
         task = asyncio.create_task(execute_job(**executor_kwargs))
     task.add_done_callback(lambda t, j=job_id: _on_task_done(j, t))
