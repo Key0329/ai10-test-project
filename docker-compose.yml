@@ -1,0 +1,10 @@
+# 正式環境 — 前後端打包進同一個 image
+# 使用方式：docker compose up --build
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env          # 如果有 .env 就載入（沒有也不會報錯）
+    restart: unless-stopped

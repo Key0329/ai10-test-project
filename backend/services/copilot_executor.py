@@ -354,9 +354,19 @@ async def execute_copilot_job(
         await _log(job_id, "system", f"[Copilot] Starting SDK session in {work_dir}")
 
         # 暫時注入 env vars 供 CLI 子進程繼承（對應 v3 的環境假設）
+        # COPILOT_GITHUB_TOKEN 專門給 Copilot SDK 使用（從 .env 或環境變數讀取）
+        # github_token（前端傳入）只用於 git clone / PR 等 git 操作
+        copilot_token = (
+            os.environ.get("COPILOT_GITHUB_TOKEN")
+            or _load_dotenv_value("COPILOT_GITHUB_TOKEN")
+            or github_token  # fallback：若未設定則沿用 git token
+        )
+        if copilot_token != github_token:
+            await _log(job_id, "system", "[Copilot] 使用 COPILOT_GITHUB_TOKEN 作為 SDK 憑證", event_type="system")
+
         _credential_keys = {"GITHUB_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL"}
         saved_env = {k: os.environ.get(k) for k in _credential_keys}
-        os.environ["GITHUB_TOKEN"] = github_token
+        os.environ["GITHUB_TOKEN"] = copilot_token
         os.environ["JIRA_API_TOKEN"] = jira_api_token
         os.environ["JIRA_EMAIL"] = jira_email
         jira_base_url = (

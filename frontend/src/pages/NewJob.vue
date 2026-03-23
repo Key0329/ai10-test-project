@@ -281,6 +281,7 @@ async function handleSubmit() {
           </div>
         </div>
 
+        <!-- Priority, Your Name, Extra Prompt 暫時隱藏
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Priority</label>
@@ -308,6 +309,7 @@ async function handleSubmit() {
             rows="3"
           />
         </div>
+        -->
 
         <button class="btn" type="submit" :disabled="submitting">
           {{ submitting ? 'Submitting...' : '→ Submit Job' }}

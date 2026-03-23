@@ -1,0 +1,37 @@
+# 開發環境 — 改程式碼不需要 rebuild！
+# 使用方式：docker compose -f docker-compose.dev.yml up
+#
+# ┌─────────────────────────────────────────────────────┐
+# │  改後端 .py  → uvicorn --reload 自動重啟，0 rebuild  │
+# │  改前端 .vue → vite HMR 自動更新，0 rebuild          │
+# └─────────────────────────────────────────────────────┘
+services:
+  # ─── 後端：掛載本機目錄 + --reload ──────────────────
+  backend:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: >-
+      sh -c "pip install uv -q &&
+      uv pip install --system -q aiosqlite==0.20.0 fastapi==0.115.6 'github-copilot-sdk>=0.1.23' pydantic==2.10.4 pydantic-settings==2.7.1 sse-starlette==2.2.1 'uvicorn[standard]==0.34.0' &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # ─── 前端：vite dev server + proxy 到後端 ──────────
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped

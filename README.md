@@ -20,6 +20,45 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 # http://<Mac-Mini-IP>:8000
 ```
 
+## Docker 啟動
+
+> 需先安裝 Docker（或 [Colima](https://github.com/abiosoft/colima)）
+
+### 開發環境（改程式碼不需要 rebuild）
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+| 服務 | URL | 說明 |
+|------|-----|------|
+| 前端 | http://localhost:5173 | Vite dev server，Vue 改動即時 HMR |
+| 後端 | http://localhost:8000 | uvicorn --reload，Python 改動自動重啟 |
+
+### 正式環境（前後端打包進同一 image）
+
+```bash
+docker compose up --build
+```
+
+| URL | 說明 |
+|-----|------|
+| http://localhost:8000 | FastAPI 同時 serve API 和前端靜態檔案 |
+
+> **有改動需要 rebuild 嗎？**
+> - 開發環境：**不需要**，volume mount 直接同步本機檔案
+> - 正式環境：改了程式碼後需要加 `--build`，但 Docker layer cache 會跳過未改動的層（只改後端 → Node build 層 cache；只改前端 → Python deps 層 cache）
+
+### 停止
+
+```bash
+# 開發環境
+docker compose -f docker-compose.dev.yml down
+
+# 正式環境
+docker compose down
+```
+
 ## Architecture
 
 ```
