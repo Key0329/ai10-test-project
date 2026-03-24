@@ -128,3 +128,124 @@ class TestStreamOutput:
         )
         rows = await cursor.fetchall()
         assert [r["event_type"] for r in rows] == ["tool_use", "raw", "tool_result"]
+
+
+class TestExtractDisplayMessage:
+    """Verify _extract_display_message refines event_type correctly."""
+
+    def test_pure_text_returns_assistant(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [{"type": "text", "text": "Hello world"}],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "assistant"
+        assert msg == "Hello world"
+
+    def test_tool_use_non_mcp_non_skill_returns_tool_use(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Edit", "input": {"command": "edit file"}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "tool_use"
+
+    def test_mcp_tool_still_returns_mcp(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "mcp__server__tool", "input": {"description": "do stuff"}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "mcp"
+
+    def test_skill_tool_still_returns_skill(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Skill", "input": {"description": "run skill"}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "skill"
+
+    def test_mixed_text_and_tool_use_returns_tool_use(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Let me edit the file"},
+                    {"type": "tool_use", "name": "Edit", "input": {"command": "edit"}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "tool_use"
+
+    def test_mcp_takes_priority_over_tool_use(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Edit", "input": {}},
+                    {"type": "tool_use", "name": "mcp__server__tool", "input": {}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "mcp"
+
+    def test_skill_takes_priority_over_tool_use(self):
+        from services.executor import _extract_display_message
+
+        parsed = {
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Edit", "input": {}},
+                    {"type": "tool_use", "name": "Skill", "input": {}},
+                ],
+            }
+        }
+        refined, msg = _extract_display_message("assistant", parsed)
+        assert refined == "skill"
+
+    def test_user_event_returns_tool_result(self):
+        from services.executor import _extract_display_message
+
+        parsed = {"tool_use_result": "some output"}
+        refined, msg = _extract_display_message("user", parsed)
+        assert refined == "tool_result"
+        assert msg == "some output"
+
+    def test_user_event_with_dict_result_returns_tool_result(self):
+        from services.executor import _extract_display_message
+
+        parsed = {"tool_use_result": {"stdout": "ok", "stderr": ""}}
+        refined, msg = _extract_display_message("user", parsed)
+        assert refined == "tool_result"
+        assert msg == "ok"
+
+    def test_user_event_empty_result_returns_tool_result(self):
+        from services.executor import _extract_display_message
+
+        parsed = {"tool_use_result": ""}
+        refined, msg = _extract_display_message("user", parsed)
+        assert refined == "tool_result"
+        assert msg is None

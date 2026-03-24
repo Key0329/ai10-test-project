@@ -59,7 +59,7 @@ class TestExtractDisplayMessageSkillClassification:
 
 
 class TestExtractDisplayMessageMixedTools:
-    """Verify priority logic: mcp > skill > assistant."""
+    """Verify priority logic: mcp > skill > tool_use > assistant."""
 
     def test_mixed_mcp_and_regular_returns_mcp(self):
         from services.executor import _extract_display_message
@@ -108,9 +108,9 @@ class TestExtractDisplayMessageMixedTools:
 
 
 class TestExtractDisplayMessageBackwardCompat:
-    """Verify regular tools and non-assistant events remain unchanged."""
+    """Verify regular tools use tool_use and non-assistant events remain unchanged."""
 
-    def test_regular_tool_returns_assistant_event_type(self):
+    def test_regular_tool_returns_tool_use_event_type(self):
         from services.executor import _extract_display_message
 
         parsed = {
@@ -122,7 +122,7 @@ class TestExtractDisplayMessageBackwardCompat:
             },
         }
         event_type, msg = _extract_display_message("assistant", parsed)
-        assert event_type == "assistant"
+        assert event_type == "tool_use"
         assert "[tool]" in msg
 
     def test_text_only_assistant_returns_assistant(self):
@@ -154,9 +154,9 @@ class TestExtractDisplayMessageBackwardCompat:
         event_type, msg = _extract_display_message("result", parsed)
         assert event_type == "result"
 
-    def test_user_event_unchanged(self):
+    def test_user_event_returns_tool_result(self):
         from services.executor import _extract_display_message
 
         parsed = {"type": "user", "tool_use_result": "output text"}
         event_type, msg = _extract_display_message("user", parsed)
-        assert event_type == "user"
+        assert event_type == "tool_result"

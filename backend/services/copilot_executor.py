@@ -524,7 +524,7 @@ async def execute_copilot_job(
                     # 偵測 MCP tool call（mcp__ 前綴）
                     is_mcp = tool_name.startswith("mcp__")
                     prefix_tag = "[mcp]" if is_mcp else "[tool]"
-                    evt_type = "mcp" if is_mcp else "assistant"
+                    evt_type = "mcp" if is_mcp else "tool_use"
                     msg = f"{prefix_tag} ▶ {tool_name}: {args_display}" if args_display else f"{prefix_tag} ▶ {tool_name}"
                     asyncio.ensure_future(
                         _log(job_id, "stdout", msg, event_type=evt_type)
@@ -539,9 +539,11 @@ async def execute_copilot_job(
                     ) or ""
                     display = partial or progress_msg
                     if display:
+                        is_mcp = tool_name.startswith("mcp__") if tool_name else False
                         prefix = f"[tool:{tool_name}] " if tool_name else "[tool] "
+                        progress_evt_type = "mcp" if is_mcp else "tool_use"
                         asyncio.ensure_future(
-                            _log(job_id, "stdout", f"{prefix}{str(display)[:500]}", event_type="assistant")
+                            _log(job_id, "stdout", f"{prefix}{str(display)[:500]}", event_type=progress_evt_type)
                         )
 
                 elif event_type == "tool.execution_complete":
@@ -563,7 +565,7 @@ async def execute_copilot_job(
                             result_str = str(result)
                         is_mcp = tool_name.startswith("mcp__")
                         prefix_tag = "[mcp]" if is_mcp else "[tool]"
-                        evt_type = "mcp" if is_mcp else "assistant"
+                        evt_type = "mcp" if is_mcp else "tool_result"
                         prefix = f"{prefix_tag} ✓ {tool_name} → " if tool_name else f"{prefix_tag} ✓ "
                         asyncio.ensure_future(
                             _log(job_id, "stdout", prefix + result_str[:400], event_type=evt_type)

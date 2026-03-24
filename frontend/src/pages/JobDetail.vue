@@ -61,6 +61,20 @@ const nextRun = computed(() => {
 
 const filteredLogs = computed(() => logs.value.filter(matchesFilter))
 
+const MILESTONE_RE = /Clone complete|Session initialized|PR base branch|Running claude -p|Starting SDK session|exited with code|執行完成/
+
+function isMilestone(entry) {
+  if (entry.stream !== 'system' && entry.event_type !== 'system') return false
+  return MILESTONE_RE.test(entry.message)
+}
+
+const latestMilestone = computed(() => {
+  for (let i = logs.value.length - 1; i >= 0; i--) {
+    if (isMilestone(logs.value[i])) return logs.value[i]
+  }
+  return null
+})
+
 function matchesFilter(entry) {
   if (filter.value === 'all') return true
   if (filter.value === 'assistant') return entry.event_type === 'assistant'
@@ -72,13 +86,15 @@ function matchesFilter(entry) {
 }
 
 function lineClass(entry) {
+  const milestone = isMilestone(entry) ? ' log-line-milestone' : ''
   if (entry.stream === 'error') return 'log-line log-line-error'
   if (entry.stream === 'stderr') return 'log-line log-line-stderr'
-  if (entry.stream === 'system') return 'log-line log-line-system'
+  if (entry.stream === 'system') return 'log-line log-line-system' + milestone
   if (entry.event_type === 'mcp') return 'log-line log-line-mcp'
   if (entry.event_type === 'skill') return 'log-line log-line-skill'
+  if (entry.event_type === 'tool_use') return 'log-line log-line-tool-use'
+  if (entry.event_type === 'tool_result') return 'log-line log-line-tool-result'
   if (entry.event_type === 'assistant') return 'log-line log-line-assistant'
-  if (entry.event_type === 'user') return 'log-line log-line-tool-result'
   if (entry.event_type === 'result') return 'log-line log-line-result'
   return 'log-line'
 }
@@ -88,8 +104,9 @@ function tagLabel(entry) {
   if (entry.stream === 'error') return 'ERR'
   if (entry.event_type === 'mcp') return 'MCP'
   if (entry.event_type === 'skill') return 'SKL'
+  if (entry.event_type === 'tool_use') return 'TOOL'
+  if (entry.event_type === 'tool_result') return 'RES'
   if (entry.event_type === 'assistant') return 'AI'
-  if (entry.event_type === 'user') return 'TOOL'
   if (entry.event_type === 'system') return 'INIT'
   if (entry.event_type === 'result') return 'DONE'
   return entry.event_type || entry.stream
@@ -100,8 +117,9 @@ function tagColor(entry) {
   if (entry.stream === 'system') return '#75736e'
   if (entry.event_type === 'mcp') return '#4aafb5'
   if (entry.event_type === 'skill') return '#c99040'
+  if (entry.event_type === 'tool_use') return '#b89040'
+  if (entry.event_type === 'tool_result') return '#9b8dbd'
   if (entry.event_type === 'assistant') return '#7ba3c9'
-  if (entry.event_type === 'user') return '#9b8dbd'
   if (entry.event_type === 'system') return '#75736e'
   if (entry.event_type === 'result') return '#6aab87'
   return '#75736e'
@@ -313,6 +331,15 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="log-viewer" ref="logEl" @scroll="onLogScroll">
+      <div class="log-sticky-bar">
+        <template v-if="latestMilestone">
+          <span class="log-sticky-msg">{{ latestMilestone.message.split('\n')[0] }}</span>
+          <span class="log-sticky-elapsed">{{ elapsed() }}</span>
+        </template>
+        <template v-else>
+          <span class="log-sticky-msg">{{ isActive ? 'Waiting for output...' : 'No logs available.' }}</span>
+        </template>
+      </div>
       <div v-if="filteredLogs.length === 0" style="color: var(--text-hint)">
         {{ isActive ? 'Waiting for output...' : 'No logs available.' }}
       </div>

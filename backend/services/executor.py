@@ -141,8 +141,9 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
     """Extract a human-readable message and refined event_type from a stream-json event.
 
     Returns (refined_event_type, display_message).
-    For assistant events with MCP/Skill tool_use, event_type is refined
-    with priority: mcp > skill > assistant.
+    For assistant events with tool_use blocks, event_type is refined
+    with priority: mcp > skill > tool_use > assistant.
+    For user events (tool results), event_type is refined to "tool_result".
     """
     if event_type == "assistant":
         msg = parsed.get("message", {})
@@ -150,6 +151,7 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
         parts = []
         has_mcp = False
         has_skill = False
+        has_tool = False
         for block in contents:
             if block.get("type") == "text":
                 parts.append(block.get("text", ""))
@@ -166,9 +168,10 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
                     has_skill = True
                     prefix = "[skill]"
                 else:
+                    has_tool = True
                     prefix = "[tool]"
                 parts.append(f"{prefix} {name}: {desc}" if desc else f"{prefix} {name}")
-        refined = "mcp" if has_mcp else "skill" if has_skill else "assistant"
+        refined = "mcp" if has_mcp else "skill" if has_skill else "tool_use" if has_tool else "assistant"
         return refined, "\n".join(parts) if parts else None
     if event_type == "user":
         result = parsed.get("tool_use_result", "")
@@ -176,7 +179,7 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
             result = result.get("stdout", "") or result.get("stderr", "")
         if isinstance(result, str) and len(result) > 200:
             result = result[:200] + "..."
-        return event_type, result or None
+        return "tool_result", result or None
     if event_type == "system":
         subtype = parsed.get("subtype", "")
         if subtype == "init":
