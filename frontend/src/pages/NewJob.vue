@@ -188,7 +188,10 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <!-- MCP 設定（僅 Copilot 模式顯示） -->
+        <!-- MCP 設定 -->
+        <div v-if="form.agent_mode === 'claude_code'" style="margin-bottom: 16px; padding: 10px 14px; background: color-mix(in srgb, #60a5fa 6%, transparent); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-hint)">
+          ⬜ MCP 設定來自 repo 的 <code>.mcp.json</code>，由 Claude Code CLI 自動載入
+        </div>
         <div v-if="form.agent_mode === 'copilot'" style="margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden">
           <div
             style="padding: 10px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; background: color-mix(in srgb, #a78bfa 8%, transparent)"
@@ -196,7 +199,7 @@ async function handleSubmit() {
           >
             <span style="width: 8px; height: 8px; border-radius: 50%; background: #a78bfa; flex-shrink: 0; display: inline-block"></span>
             <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em">
-              MCP 設定 · {{ selectedMcps.length }} 個已啟用
+              額外 MCP（補充 repo 設定） · {{ selectedMcps.length }} 個已啟用
             </span>
             <span style="margin-left: auto; font-size: 12px; color: var(--text-hint); transition: transform 0.2s" :style="mcpExpanded ? 'transform: rotate(180deg)' : ''">▾</span>
           </div>

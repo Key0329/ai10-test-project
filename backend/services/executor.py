@@ -522,6 +522,22 @@ async def _verify_repo_config(job_id: str, work_dir: str) -> None:
     else:
         lines.append("⚠️  Skills：找不到 .claude/skills/ 目錄")
 
+    # 3. 檢查 .mcp.json
+    mcp_json_path = os.path.join(work_dir, ".mcp.json")
+    if os.path.isfile(mcp_json_path):
+        try:
+            with open(mcp_json_path, encoding="utf-8") as f:
+                mcp_data = json.load(f)
+            servers = mcp_data.get("mcpServers", {})
+            if servers:
+                lines.append(f"✅ .mcp.json（{len(servers)} 個 MCP servers）：{', '.join(servers.keys())}")
+            else:
+                lines.append("⚠️  .mcp.json 存在但 mcpServers 為空")
+        except (json.JSONDecodeError, OSError):
+            lines.append("⚠️  .mcp.json 存在但解析失敗")
+    else:
+        lines.append("⬜ .mcp.json：找不到（Claude Code 將不載入 MCP servers）")
+
     lines.append("──────────────────────────")
     await _log(job_id, "system", "\n".join(lines), event_type="system")
 

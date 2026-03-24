@@ -8,7 +8,7 @@ TBD - created by archiving change 'log-summary-and-theme'. Update Purpose after 
 
 ### Requirement: Emit execution summary log on job completion
 
-The executor SHALL insert a system log entry into `job_logs` when a job finishes (both completed and failed), containing a formatted summary of token usage, cost, MCP servers used, and skills used.
+The executor SHALL insert a system log entry into `job_logs` when a job finishes (both completed and failed), containing a formatted summary of token usage, cost, MCP servers used, and skills used. This requirement SHALL apply to both the Claude Code executor and the Copilot executor.
 
 #### Scenario: Summary log after successful job
 
@@ -25,28 +25,29 @@ The executor SHALL insert a system log entry into `job_logs` when a job finishes
 - **WHEN** a job finishes but no `result` event exists in `job_logs`
 - **THEN** the executor SHALL skip summary emission without error
 
+#### Scenario: Copilot executor emits MCP summary
+
+- **WHEN** a Copilot mode job completes and log entries with `event_type` = `mcp` exist
+- **THEN** the Copilot executor SHALL collect unique MCP server names from those log entries and include them in the summary, using the same format as the Claude Code executor
+
 
 <!-- @trace
-source: log-summary-and-theme
-updated: 2026-03-20
+source: dynamic-repo-mcp
+updated: 2026-03-24
 code:
-  - backend/services/queue.py
-  - frontend/src/api.js
-  - backend/models/job.py
-  - backend/db.py
-  - frontend/src/app.css
-  - backend/jirara.db
-  - backend/routers/jobs.py
   - backend/services/executor.py
-  - frontend/src/pages/JobDetail.vue
-  - .env.example
+  - setup.sh
+  - frontend/src/pages/NewJob.vue
+  - dev.sh
+  - frontend/.DS_Store
+  - .DS_Store
+  - backend/services/copilot_executor.py
+  - backend/db.py
+  - SETUP-TROUBLESHOOTING.md
+  - backend/services/mcp_loader.py
 tests:
-  - backend/tests/test_rerun_api.py
-  - backend/tests/test_rerun_db.py
-  - backend/tests/test_rerun_models.py
-  - backend/tests/test_rerun_chain.py
-  - backend/tests/test_emit_summary.py
-  - backend/tests/test_event_classify.py
+  - backend/tests/test_mcp_loader.py
+  - backend/tests/test_copilot_mcp_classify.py
 -->
 
 ---
@@ -91,7 +92,7 @@ tests:
 ---
 ### Requirement: Collect MCP server names from logs
 
-The executor SHALL query all log entries with `event_type` = `mcp` for the job and extract unique MCP server names using the `mcp__<server>__` prefix pattern.
+The executor SHALL query all log entries with `event_type` = `mcp` for the job and extract unique MCP server names using the `mcp__<server>__` prefix pattern. This requirement SHALL apply to both the Claude Code executor and the Copilot executor.
 
 #### Scenario: Job used MCP tools
 
@@ -105,26 +106,22 @@ The executor SHALL query all log entries with `event_type` = `mcp` for the job a
 
 
 <!-- @trace
-source: log-summary-and-theme
-updated: 2026-03-20
+source: dynamic-repo-mcp
+updated: 2026-03-24
 code:
-  - backend/services/queue.py
-  - frontend/src/api.js
-  - backend/models/job.py
-  - backend/db.py
-  - frontend/src/app.css
-  - backend/jirara.db
-  - backend/routers/jobs.py
   - backend/services/executor.py
-  - frontend/src/pages/JobDetail.vue
-  - .env.example
+  - setup.sh
+  - frontend/src/pages/NewJob.vue
+  - dev.sh
+  - frontend/.DS_Store
+  - .DS_Store
+  - backend/services/copilot_executor.py
+  - backend/db.py
+  - SETUP-TROUBLESHOOTING.md
+  - backend/services/mcp_loader.py
 tests:
-  - backend/tests/test_rerun_api.py
-  - backend/tests/test_rerun_db.py
-  - backend/tests/test_rerun_models.py
-  - backend/tests/test_rerun_chain.py
-  - backend/tests/test_emit_summary.py
-  - backend/tests/test_event_classify.py
+  - backend/tests/test_mcp_loader.py
+  - backend/tests/test_copilot_mcp_classify.py
 -->
 
 ---
@@ -163,4 +160,38 @@ tests:
   - backend/tests/test_rerun_chain.py
   - backend/tests/test_emit_summary.py
   - backend/tests/test_event_classify.py
+-->
+
+---
+### Requirement: Copilot executor classifies MCP tool events
+
+The Copilot executor SHALL detect MCP tool calls in `tool.execution_start` and `tool.execution_complete` events by checking if the `tool_name` starts with `mcp__`. When detected, the log entry SHALL be stored with `event_type` = `mcp` instead of `assistant`.
+
+#### Scenario: Copilot tool event is MCP tool
+
+- **WHEN** a `tool.execution_start` event has `tool_name` starting with `mcp__`
+- **THEN** the log entry SHALL be stored with `event_type` = `mcp`
+
+#### Scenario: Copilot tool event is not MCP tool
+
+- **WHEN** a `tool.execution_start` event has `tool_name` that does not start with `mcp__`
+- **THEN** the log entry SHALL be stored with `event_type` = `assistant`
+
+<!-- @trace
+source: dynamic-repo-mcp
+updated: 2026-03-24
+code:
+  - backend/services/executor.py
+  - setup.sh
+  - frontend/src/pages/NewJob.vue
+  - dev.sh
+  - frontend/.DS_Store
+  - .DS_Store
+  - backend/services/copilot_executor.py
+  - backend/db.py
+  - SETUP-TROUBLESHOOTING.md
+  - backend/services/mcp_loader.py
+tests:
+  - backend/tests/test_mcp_loader.py
+  - backend/tests/test_copilot_mcp_classify.py
 -->

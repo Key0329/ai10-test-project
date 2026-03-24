@@ -3,12 +3,14 @@
 import asyncio
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 
 import urllib.request
 import urllib.error
 
+from db import get_db
 from services.executor import (
     _log,
     _update_status,
@@ -178,6 +180,22 @@ async def _verify_copilot_repo_config(job_id: str, work_dir: str) -> None:
     else:
         lines.append("⚠️  .github/skills/ 目錄不存在")
 
+    # 4. 檢查 .mcp.json
+    mcp_json_path = os.path.join(work_dir, ".mcp.json")
+    if os.path.isfile(mcp_json_path):
+        try:
+            with open(mcp_json_path, encoding="utf-8") as f:
+                mcp_data = json.load(f)
+            servers = mcp_data.get("mcpServers", {})
+            if servers:
+                lines.append(f"✅ .mcp.json（{len(servers)} 個 MCP servers）：{', '.join(servers.keys())}")
+            else:
+                lines.append("⚠️  .mcp.json 存在但 mcpServers 為空")
+        except (json.JSONDecodeError, OSError):
+            lines.append("⚠️  .mcp.json 存在但解析失敗")
+    else:
+        lines.append("⬜ .mcp.json：找不到")
+
     lines.append("──────────────────────────")
     await _log(job_id, "system", "\n".join(lines), event_type="system")
 
@@ -264,6 +282,30 @@ async def _preflight_check(
 
     lines.append("──────────────────────────")
     await _log(job_id, "system", "\n".join(lines), event_type="system")
+
+
+# ── MCP 使用統計 ──────────────────────────────────────────────────────────────
+
+async def _emit_copilot_mcp_summary(job_id: str) -> None:
+    """統計 Copilot job 實際使用的 MCP servers，格式對齊 Claude Code executor。"""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT message FROM job_logs WHERE job_id = ? AND event_type = 'mcp'",
+            (job_id,),
+        )
+        rows = await cursor.fetchall()
+        mcp_servers: set[str] = set()
+        for r in rows:
+            match = re.search(r"mcp__(\w+)__", r["message"])
+            if match:
+                mcp_servers.add(match.group(1))
+        mcp_str = ", ".join(sorted(mcp_servers)) if mcp_servers else "(none)"
+        await _log(job_id, "system",
+            f"────── 執行摘要 ──────\nMCP：{mcp_str}\n──────────────────────",
+            event_type="system")
+    finally:
+        await db.close()
 
 
 # ── 主執行函數 ─────────────────────────────────────────────────────────────────
@@ -398,11 +440,37 @@ async def execute_copilot_job(
                 on_permission_request=PermissionHandler.approve_all,
             )
 
-            # 注入 MCP servers 設定（對應 v3 agent_action.py 相同邏輯）
+            # 注入 MCP servers 設定：repo .mcp.json（主）+ 使用者補充（次）
+            from services.mcp_loader import load_repo_mcp_config, convert_to_copilot_format, detect_missing_env_vars
+
+            repo_mcp_raw = load_repo_mcp_config(work_dir)
+            repo_mcp = convert_to_copilot_format(repo_mcp_raw) if repo_mcp_raw else {}
+
+            if repo_mcp_raw:
+                missing_vars = detect_missing_env_vars(repo_mcp_raw)
+                if missing_vars:
+                    await _log(job_id, "system",
+                        f"[Copilot] ⚠️ .mcp.json 引用了未定義的環境變數：{', '.join(missing_vars)}",
+                        event_type="system")
+
+            # 合併：repo 優先，使用者補充的不覆蓋 repo 定義
+            final_mcp = dict(repo_mcp)
             if mcp_config:
-                session_config["mcp_servers"] = mcp_config
+                for key, val in mcp_config.items():
+                    if key not in final_mcp:
+                        final_mcp[key] = val
+
+            if final_mcp:
+                session_config["mcp_servers"] = final_mcp
+                repo_keys = list(repo_mcp.keys())
+                supp_keys = [k for k in final_mcp if k not in repo_mcp]
+                parts = []
+                if repo_keys:
+                    parts.append(f"repo: {', '.join(repo_keys)}")
+                if supp_keys:
+                    parts.append(f"補充: {', '.join(supp_keys)}")
                 await _log(job_id, "system",
-                    f"[Copilot] 載入 MCP servers: {list(mcp_config.keys())}",
+                    f"[Copilot] 載入 MCP servers（{' | '.join(parts)}）",
                     event_type="system")
 
             session = await client.create_session(**session_config)
@@ -450,9 +518,13 @@ async def execute_copilot_job(
                                 break
                     elif args:
                         args_display = str(args)[:200]
-                    msg = f"[tool] ▶ {tool_name}: {args_display}" if args_display else f"[tool] ▶ {tool_name}"
+                    # 偵測 MCP tool call（mcp__ 前綴）
+                    is_mcp = tool_name.startswith("mcp__")
+                    prefix_tag = "[mcp]" if is_mcp else "[tool]"
+                    evt_type = "mcp" if is_mcp else "assistant"
+                    msg = f"{prefix_tag} ▶ {tool_name}: {args_display}" if args_display else f"{prefix_tag} ▶ {tool_name}"
                     asyncio.ensure_future(
-                        _log(job_id, "stdout", msg, event_type="assistant")
+                        _log(job_id, "stdout", msg, event_type=evt_type)
                     )
 
                 elif event_type == "tool.execution_progress":
@@ -486,9 +558,12 @@ async def execute_copilot_job(
                             result_str = result
                         else:
                             result_str = str(result)
-                        prefix = f"[tool] ✓ {tool_name} → " if tool_name else "[tool] ✓ "
+                        is_mcp = tool_name.startswith("mcp__")
+                        prefix_tag = "[mcp]" if is_mcp else "[tool]"
+                        evt_type = "mcp" if is_mcp else "assistant"
+                        prefix = f"{prefix_tag} ✓ {tool_name} → " if tool_name else f"{prefix_tag} ✓ "
                         asyncio.ensure_future(
-                            _log(job_id, "stdout", prefix + result_str[:400], event_type="assistant")
+                            _log(job_id, "stdout", prefix + result_str[:400], event_type=evt_type)
                         )
                     # result 為 None 時靜默跳過，不輸出任何訊息
 
@@ -526,6 +601,9 @@ async def execute_copilot_job(
                 await client.stop()
             except Exception:
                 pass
+
+        # ── MCP 使用統計（對齊 Claude Code executor 的 _emit_summary） ────
+        await _emit_copilot_mcp_summary(job_id)
 
         await _log(job_id, "system", "[Copilot] 執行完成")
         await _update_status(

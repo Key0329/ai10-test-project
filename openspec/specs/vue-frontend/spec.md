@@ -13525,3 +13525,37 @@ tests:
   - backend/tests/test_emit_summary.py
   - backend/tests/test_event_classify.py
 -->
+
+---
+### Requirement: MCP section displays supplemental role label
+
+The NewJob form MCP configuration section SHALL display a label indicating that repo `.mcp.json` is automatically loaded and the section is for supplemental MCP servers only. The label text SHALL read "額外 MCP（補充 repo 設定）".
+
+#### Scenario: Copilot mode MCP section header
+
+- **WHEN** the user selects Copilot mode in the NewJob form
+- **THEN** the MCP section header SHALL display "額外 MCP（補充 repo 設定）"
+
+#### Scenario: Claude Code mode MCP info
+
+- **WHEN** the user selects Claude Code mode in the NewJob form
+- **THEN** the form SHALL display an informational text stating that MCP configuration is loaded from the repo `.mcp.json` by the CLI automatically
+
+<!-- @trace
+source: dynamic-repo-mcp
+updated: 2026-03-24
+code:
+  - backend/services/executor.py
+  - setup.sh
+  - frontend/src/pages/NewJob.vue
+  - dev.sh
+  - frontend/.DS_Store
+  - .DS_Store
+  - backend/services/copilot_executor.py
+  - backend/db.py
+  - SETUP-TROUBLESHOOTING.md
+  - backend/services/mcp_loader.py
+tests:
+  - backend/tests/test_mcp_loader.py
+  - backend/tests/test_copilot_mcp_classify.py
+-->
