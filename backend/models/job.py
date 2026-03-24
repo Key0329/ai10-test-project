@@ -13,9 +13,6 @@ class JobCreate(BaseModel):
     extra_prompt: Optional[str] = Field(None, max_length=2000)
     requested_by: Optional[str] = Field(None, max_length=100)
     agent_mode: Literal["claude_code", "copilot"] = Field("claude_code", description="Execution engine")
-    # MCP 設定（僅 copilot 模式使用，不寫入 DB）
-    selected_mcps: list[str] = Field(default_factory=lambda: ["context7"], description="選擇的 MCP server ID 清單")
-    mcp_tokens: dict[str, str] = Field(default_factory=dict, description="各 MCP 的 token")
     # Repo MCP 環境變數覆蓋（${VAR} 展開用，不寫入 DB）
     env_overrides: dict[str, str] = Field(default_factory=dict, description="環境變數覆蓋，用於展開 .mcp.json 中的 ${VAR}")
     # 憑證欄位：只用於本次執行，不寫入 DB

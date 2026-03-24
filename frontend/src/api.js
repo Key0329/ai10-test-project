@@ -62,17 +62,6 @@ export async function healthCheck() {
   return request('/health');
 }
 
-export async function getMcpList() {
-  return request('/mcp/list');
-}
-
-export async function testMcpServers(selectedMcps, mcpTokens = {}) {
-  return request('/mcp/test', {
-    method: 'POST',
-    body: JSON.stringify({ selected_mcps: selectedMcps, mcp_tokens: mcpTokens }),
-  });
-}
-
 export async function scanRepoMcp(repoUrl, branch, githubToken) {
   return request('/mcp/scan', {
     method: 'POST',

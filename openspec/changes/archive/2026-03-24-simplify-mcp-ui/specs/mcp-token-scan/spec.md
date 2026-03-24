@@ -1,10 +1,4 @@
-# mcp-token-scan Specification
-
-## Purpose
-
-TBD - created by archiving change 'dynamic-mcp-token-input'. Update Purpose after archive.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Scan repo .mcp.json via GitHub API
 
@@ -32,22 +26,6 @@ The endpoint SHALL accept `repo_url`, `branch` (optional), and `github_token` as
 - **WHEN** the scan endpoint is called with a `branch` parameter
 - **THEN** the GitHub API call SHALL fetch `.mcp.json` from that specific branch
 
-
-<!-- @trace
-source: simplify-mcp-ui
-updated: 2026-03-24
-code:
-  - backend/services/mcp.py
-  - backend/routers/mcp.py
-  - backend/models/job.py
-  - backend/services/copilot_executor.py
-  - frontend/src/pages/NewJob.vue
-  - backend/routers/jobs.py
-  - frontend/src/api.js
-  - dev.sh
--->
-
----
 ### Requirement: Frontend auto-scans on repo selection
 
 The NewJob form SHALL automatically call the scan endpoint when the user selects or changes the repository URL. The call SHALL be debounced to avoid excessive API requests. The scan SHALL execute regardless of the selected engine mode.
@@ -71,17 +49,3 @@ The NewJob form SHALL automatically call the scan endpoint when the user selects
 
 - **WHEN** the scan returns `servers: ["context7", "sentry"]` and `missing_vars: ["SENTRY_TOKEN"]`
 - **THEN** the form SHALL display the MCP server summary AND the token input field for `SENTRY_TOKEN`
-
-<!-- @trace
-source: simplify-mcp-ui
-updated: 2026-03-24
-code:
-  - backend/services/mcp.py
-  - backend/routers/mcp.py
-  - backend/models/job.py
-  - backend/services/copilot_executor.py
-  - frontend/src/pages/NewJob.vue
-  - backend/routers/jobs.py
-  - frontend/src/api.js
-  - dev.sh
--->

@@ -13529,74 +13529,41 @@ tests:
 ---
 ### Requirement: MCP section displays supplemental role label
 
-The NewJob form MCP configuration section SHALL display a label indicating that repo `.mcp.json` is automatically loaded and the section is for supplemental MCP servers only. The label text SHALL read "額外 MCP（補充 repo 設定）".
+The NewJob form SHALL display a data-driven MCP detection summary when the repo scan detects MCP servers. The summary SHALL show the number of detected servers and their names. When no servers are detected or no scan has been performed, the MCP section SHALL NOT be displayed.
 
-#### Scenario: Copilot mode MCP section header
+#### Scenario: Repo has MCP servers
 
-- **WHEN** the user selects Copilot mode in the NewJob form
-- **THEN** the MCP section header SHALL display "額外 MCP（補充 repo 設定）"
+- **WHEN** the scan returns servers `["context7", "sentry", "figma"]`
+- **THEN** the form SHALL display a summary reading "偵測到 3 個 MCP servers：context7, sentry, figma"
 
-#### Scenario: Claude Code mode MCP info
+#### Scenario: Repo has no MCP servers
 
-- **WHEN** the user selects Claude Code mode in the NewJob form
-- **THEN** the form SHALL display an informational text stating that MCP configuration is loaded from the repo `.mcp.json` by the CLI automatically
+- **WHEN** the scan returns `servers: []`
+- **THEN** the form SHALL NOT display any MCP summary section
 
-<!-- @trace
-source: dynamic-repo-mcp
-updated: 2026-03-24
-code:
-  - backend/services/executor.py
-  - setup.sh
-  - frontend/src/pages/NewJob.vue
-  - dev.sh
-  - frontend/.DS_Store
-  - .DS_Store
-  - backend/services/copilot_executor.py
-  - backend/db.py
-  - SETUP-TROUBLESHOOTING.md
-  - backend/services/mcp_loader.py
-tests:
-  - backend/tests/test_mcp_loader.py
-  - backend/tests/test_copilot_mcp_classify.py
--->
+#### Scenario: Scan not yet performed
 
----
-### Requirement: Dynamic MCP token input fields
+- **WHEN** no repo URL has been selected or the scan has not completed
+- **THEN** the form SHALL NOT display any MCP summary section
 
-The NewJob form SHALL display dynamic password input fields for each missing environment variable detected by the MCP scan. Each field SHALL be labeled with the variable name (e.g., `SENTRY_TOKEN`) and the values SHALL be included as `env_overrides` in the job submission payload.
+#### Scenario: Summary is engine-agnostic
 
-#### Scenario: Multiple missing variables
+- **WHEN** the user is in Claude Code mode or Copilot mode and the scan returns servers
+- **THEN** the MCP summary SHALL be displayed identically regardless of engine mode
 
-- **WHEN** the scan returns `missing_vars: ["API_KEY", "SENTRY_TOKEN"]`
-- **THEN** the form SHALL display two password input fields labeled `API_KEY` and `SENTRY_TOKEN`
-
-#### Scenario: User fills in token and submits
-
-- **WHEN** the user fills in `SENTRY_TOKEN` = `abc123` and submits the job
-- **THEN** the job payload SHALL include `env_overrides: {"SENTRY_TOKEN": "abc123"}`
-
-#### Scenario: Both modes show token fields
-
-- **WHEN** the user is in Claude Code mode or Copilot mode and the scan detects missing variables
-- **THEN** the dynamic token input fields SHALL be displayed regardless of mode
 
 <!-- @trace
-source: dynamic-mcp-token-input
+source: simplify-mcp-ui
 updated: 2026-03-24
 code:
-  - backend/models/job.py
-  - backend/services/mcp_loader.py
+  - backend/services/mcp.py
   - backend/routers/mcp.py
-  - frontend/src/api.js
-  - .github/skills/jirara/SKILL.md
-  - .github/skills/jirara/jirara.md
+  - backend/models/job.py
   - backend/services/copilot_executor.py
-  - backend/services/executor.py
-  - backend/routers/jobs.py
   - frontend/src/pages/NewJob.vue
-tests:
-  - backend/tests/test_env_overrides.py
-  - backend/tests/test_mcp_loader.py
+  - backend/routers/jobs.py
+  - frontend/src/api.js
+  - dev.sh
 -->
 
 ---

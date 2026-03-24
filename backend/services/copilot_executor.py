@@ -321,7 +321,6 @@ async def execute_copilot_job(
     github_token: str = "",
     jira_api_token: str = "",
     jira_email: str = "",
-    mcp_config: dict | None = None,
     env_overrides: dict[str, str] | None = None,
 ):
     """對應 v3 AgentService.run()，整合 v4 的 logging / status 機制。"""
@@ -456,17 +455,10 @@ async def execute_copilot_job(
                         f"[Copilot] ⚠️ .mcp.json 引用了未定義的環境變數：{', '.join(missing_vars)}",
                         event_type="system")
 
-            # 合併：repo 優先，使用者補充的不覆蓋 repo 定義
-            final_mcp = dict(repo_mcp)
-            if mcp_config:
-                for key, val in mcp_config.items():
-                    if key not in final_mcp:
-                        final_mcp[key] = val
-
-            if final_mcp:
-                session_config["mcp_servers"] = final_mcp
+            if repo_mcp:
+                session_config["mcp_servers"] = repo_mcp
                 repo_keys = list(repo_mcp.keys())
-                supp_keys = [k for k in final_mcp if k not in repo_mcp]
+                supp_keys = []
                 parts = []
                 if repo_keys:
                     parts.append(f"repo: {', '.join(repo_keys)}")

@@ -11,6 +11,9 @@ if [ -f "$DB_FILE" ]; then
   echo "✔ 已清除舊 DB"
 fi
 
+# 釋放被佔用的 port
+lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "✔ 已釋放 port 8000"
+
 # 後端
 cd backend && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
 
