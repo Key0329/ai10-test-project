@@ -3,6 +3,7 @@
 import pytest
 import pytest_asyncio
 import aiosqlite
+from unittest.mock import patch, MagicMock
 
 from datetime import datetime, timezone
 
@@ -25,17 +26,28 @@ async def db(tmp_path):
     await conn.close()
 
 
+def _dummy_payload():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from models.job import RerunRequest
+    return RerunRequest(
+        github_token="ghp_test",
+        jira_api_token="jira_test",
+        jira_email="test@example.com",
+    )
+
+
 async def _insert_job(db, job_id, jira_ticket="TEST-1", status="completed",
                       repo_url="https://github.com/test/repo", branch="main",
-                      extra_prompt="", priority=3, requested_by="tester",
+                      extra_prompt="", requested_by="tester",
                       parent_job_id=None):
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
         """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                            priority, requested_by, status, parent_job_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            requested_by, status, parent_job_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (job_id, repo_url, jira_ticket, branch, extra_prompt,
-         priority, requested_by, status, parent_job_id, now),
+         requested_by, status, parent_job_id, now),
     )
     await db.commit()
 
@@ -44,27 +56,32 @@ class TestRerunEndpoint:
     """Tests for the rerun_job route function."""
 
     @pytest.mark.asyncio
-    async def test_rerun_completed_job(self, db):
+    @patch("routers.jobs.asyncio")
+    async def test_rerun_completed_job(self, mock_asyncio, db):
         """Rerun a completed job should create a new queued job with parent_job_id."""
+        mock_task = MagicMock()
+        mock_asyncio.create_task.return_value = mock_task
         await _insert_job(db, "TEST-1-1000", status="completed")
 
         from routers.jobs import _rerun_job_impl
-        result = await _rerun_job_impl("TEST-1-1000", db)
+        result = await _rerun_job_impl("TEST-1-1000", db, _dummy_payload())
 
         assert result.status == "queued"
         assert result.parent_job_id == "TEST-1-1000"
         assert result.jira_ticket == "TEST-1"
         assert result.repo_url == "https://github.com/test/repo"
         assert result.branch == "main"
-        assert result.priority == 3
 
     @pytest.mark.asyncio
-    async def test_rerun_failed_job(self, db):
+    @patch("routers.jobs.asyncio")
+    async def test_rerun_failed_job(self, mock_asyncio, db):
         """Rerun a failed job should create a new queued job."""
+        mock_task = MagicMock()
+        mock_asyncio.create_task.return_value = mock_task
         await _insert_job(db, "TEST-2-1000", jira_ticket="TEST-2", status="failed")
 
         from routers.jobs import _rerun_job_impl
-        result = await _rerun_job_impl("TEST-2-1000", db)
+        result = await _rerun_job_impl("TEST-2-1000", db, _dummy_payload())
 
         assert result.status == "queued"
         assert result.parent_job_id == "TEST-2-1000"
@@ -78,7 +95,7 @@ class TestRerunEndpoint:
 
             from routers.jobs import _rerun_job_impl
             with pytest.raises(Exception) as exc_info:
-                await _rerun_job_impl(f"TEST-3-{active_status}", db)
+                await _rerun_job_impl(f"TEST-3-{active_status}", db, _dummy_payload())
             assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -89,7 +106,7 @@ class TestRerunEndpoint:
 
         from routers.jobs import _rerun_job_impl
         with pytest.raises(Exception) as exc_info:
-            await _rerun_job_impl("TEST-4-1000", db)
+            await _rerun_job_impl("TEST-4-1000", db, _dummy_payload())
         assert exc_info.value.status_code == 409
 
     @pytest.mark.asyncio
@@ -97,16 +114,19 @@ class TestRerunEndpoint:
         """Rerun a non-existent job should raise 404."""
         from routers.jobs import _rerun_job_impl
         with pytest.raises(Exception) as exc_info:
-            await _rerun_job_impl("NOPE-999", db)
+            await _rerun_job_impl("NOPE-999", db, _dummy_payload())
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_rerun_cancelled_job(self, db):
+    @patch("routers.jobs.asyncio")
+    async def test_rerun_cancelled_job(self, mock_asyncio, db):
         """Rerun a cancelled job should also work (not active)."""
+        mock_task = MagicMock()
+        mock_asyncio.create_task.return_value = mock_task
         await _insert_job(db, "TEST-5-1000", jira_ticket="TEST-5", status="cancelled")
 
         from routers.jobs import _rerun_job_impl
-        result = await _rerun_job_impl("TEST-5-1000", db)
+        result = await _rerun_job_impl("TEST-5-1000", db, _dummy_payload())
 
         assert result.status == "queued"
         assert result.parent_job_id == "TEST-5-1000"

@@ -8,17 +8,17 @@ TBD - created by archiving change 'job-rerun'. Update Purpose after archive.
 
 ### Requirement: Rerun API endpoint
 
-The system SHALL provide a `POST /api/v1/jobs/{id}/rerun` endpoint that creates a new job by copying the original job's parameters (`repo_url`, `jira_ticket`, `branch`, `extra_prompt`, `priority`, `requested_by`) and setting the new job's `parent_job_id` to the original job's ID.
+The system SHALL provide a `POST /api/v1/jobs/{id}/rerun` endpoint that creates a new job by copying the original job's parameters (`repo_url`, `jira_ticket`, `branch`, `extra_prompt`, `requested_by`) and setting the new job's `parent_job_id` to the original job's ID.
 
 #### Scenario: Successful rerun from completed job
 
 - **WHEN** user sends `POST /api/v1/jobs/{id}/rerun` where the job status is `completed`
-- **THEN** the system creates a new job with the same parameters, sets `parent_job_id` to the original job ID, returns the new job with status `queued` and HTTP 202
+- **THEN** the system creates a new job with the same parameters (excluding priority), sets `parent_job_id` to the original job ID, returns the new job with status `queued` and HTTP 202
 
 #### Scenario: Successful rerun from failed job
 
 - **WHEN** user sends `POST /api/v1/jobs/{id}/rerun` where the job status is `failed`
-- **THEN** the system creates a new job with the same parameters, sets `parent_job_id` to the original job ID, returns the new job with status `queued` and HTTP 202
+- **THEN** the system creates a new job with the same parameters (excluding priority), sets `parent_job_id` to the original job ID, returns the new job with status `queued` and HTTP 202
 
 #### Scenario: Rerun blocked for active job
 
@@ -37,23 +37,19 @@ The system SHALL provide a `POST /api/v1/jobs/{id}/rerun` endpoint that creates 
 
 
 <!-- @trace
-source: job-rerun
-updated: 2026-03-20
+source: remove-job-priority
+updated: 2026-03-24
 code:
-  - frontend/src/api.js
+  - frontend/src/pages/NewJob.vue
   - backend/db.py
-  - backend/jirara.db
+  - docs/system-spec.md
   - backend/services/queue.py
   - backend/routers/jobs.py
-  - frontend/src/pages/JobDetail.vue
-  - .env.example
-  - frontend/src/app.css
   - backend/models/job.py
 tests:
-  - backend/tests/test_rerun_api.py
   - backend/tests/test_rerun_chain.py
-  - backend/tests/test_rerun_db.py
   - backend/tests/test_rerun_models.py
+  - backend/tests/test_rerun_api.py
 -->
 
 ---

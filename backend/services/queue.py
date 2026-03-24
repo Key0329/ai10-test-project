@@ -17,13 +17,13 @@ _running = False
 
 
 async def _get_next_jobs(limit: int) -> list[dict]:
-    """Get the highest-priority queued jobs up to limit."""
+    """Get the next queued jobs (FIFO) up to limit."""
     db = await get_db()
     try:
         cursor = await db.execute(
             """SELECT * FROM jobs
                WHERE status = 'queued'
-               ORDER BY priority ASC, created_at ASC
+               ORDER BY created_at ASC
                LIMIT ?""",
             (limit,),
         )

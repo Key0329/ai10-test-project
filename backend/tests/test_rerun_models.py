@@ -15,7 +15,7 @@ class TestJobResponseParentJobId:
             jira_ticket="TEST-1",
             branch="main",
             extra_prompt=None,
-            priority=3,
+
             requested_by=None,
             status="queued",
             exit_code=None,
@@ -35,7 +35,7 @@ class TestJobResponseParentJobId:
             jira_ticket="TEST-1",
             branch="main",
             extra_prompt=None,
-            priority=3,
+
             requested_by=None,
             status="queued",
             exit_code=None,
@@ -56,7 +56,7 @@ class TestJobResponseParentJobId:
             jira_ticket="TEST-1",
             branch="main",
             extra_prompt=None,
-            priority=3,
+
             requested_by=None,
             status="queued",
             exit_code=None,

@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     jira_ticket TEXT NOT NULL,
     branch TEXT DEFAULT 'main',
     extra_prompt TEXT DEFAULT '',
-    priority INTEGER DEFAULT 3,
     requested_by TEXT DEFAULT '',
     agent_mode TEXT DEFAULT 'claude_code',
     status TEXT DEFAULT 'queued',

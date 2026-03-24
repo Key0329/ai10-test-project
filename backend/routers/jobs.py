@@ -25,7 +25,6 @@ def _row_to_response(r, **overrides) -> JobResponse:
         "jira_ticket": r["jira_ticket"],
         "branch": r["branch"],
         "extra_prompt": r["extra_prompt"],
-        "priority": r["priority"],
         "requested_by": r["requested_by"],
         "agent_mode": r["agent_mode"] if r["agent_mode"] else "claude_code",
         "status": r["status"],
@@ -64,15 +63,14 @@ async def create_job(payload: JobCreate):
 
         await db.execute(
             """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                                priority, requested_by, agent_mode, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
+                                requested_by, agent_mode, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
             (
                 job_id,
                 payload.repo_url,
                 payload.jira_ticket,
                 payload.branch,
                 payload.extra_prompt,
-                payload.priority,
                 payload.requested_by,
                 payload.agent_mode,
                 now,
@@ -80,12 +78,12 @@ async def create_job(payload: JobCreate):
         )
         await db.commit()
 
-        # Get queue position
+        # Get queue position (FIFO)
         cursor = await db.execute(
             """SELECT COUNT(*) as pos FROM jobs
                WHERE status = 'queued'
-               AND (priority < ? OR (priority = ? AND created_at < ?))""",
-            (payload.priority, payload.priority, now),
+               AND created_at < ?""",
+            (now,),
         )
         pos_row = await cursor.fetchone()
     finally:
@@ -127,7 +125,6 @@ async def create_job(payload: JobCreate):
         jira_ticket=payload.jira_ticket,
         branch=payload.branch,
         extra_prompt=payload.extra_prompt,
-        priority=payload.priority,
         requested_by=payload.requested_by,
         agent_mode=payload.agent_mode,
         status="queued",
@@ -341,15 +338,14 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
 
     await db.execute(
         """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                            priority, requested_by, agent_mode, status, parent_job_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)""",
+                            requested_by, agent_mode, status, parent_job_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)""",
         (
             new_job_id,
             original["repo_url"],
             original["jira_ticket"],
             original["branch"],
             original["extra_prompt"],
-            original["priority"],
             original["requested_by"],
             original_agent_mode,
             job_id,
@@ -361,8 +357,8 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
     cursor = await db.execute(
         """SELECT COUNT(*) as pos FROM jobs
            WHERE status = 'queued'
-           AND (priority < ? OR (priority = ? AND created_at < ?))""",
-        (original["priority"], original["priority"], now),
+           AND created_at < ?""",
+        (now,),
     )
     pos_row = await cursor.fetchone()
 
@@ -391,7 +387,6 @@ async def _rerun_job_impl(job_id: str, db, payload: RerunRequest) -> JobResponse
         jira_ticket=original["jira_ticket"],
         branch=original["branch"],
         extra_prompt=original["extra_prompt"],
-        priority=original["priority"],
         requested_by=original["requested_by"],
         agent_mode=original_agent_mode,
         status="queued",

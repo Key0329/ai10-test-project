@@ -29,10 +29,10 @@ async def _insert_job(db, job_id, jira_ticket="TEST-1", status="completed",
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
         """INSERT INTO jobs (id, repo_url, jira_ticket, branch, extra_prompt,
-                            priority, requested_by, status, parent_job_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            requested_by, status, parent_job_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (job_id, "https://github.com/test/repo", jira_ticket, "main", "",
-         3, "tester", status, parent_job_id, now),
+         "tester", status, parent_job_id, now),
     )
     await db.commit()
 

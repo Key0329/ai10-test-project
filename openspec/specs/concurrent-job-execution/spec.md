@@ -113,3 +113,34 @@ code:
   - .env.example
   - backend/services/queue.py
 -->
+
+---
+### Requirement: FIFO queue ordering
+
+The queue worker SHALL dispatch queued jobs in FIFO order based on `created_at` timestamp. When multiple jobs are queued, the job with the earliest `created_at` SHALL be dispatched first.
+
+#### Scenario: Jobs dispatched in creation order
+
+- **WHEN** job A is created at T1 and job B is created at T2 where T1 < T2
+- **THEN** the queue worker SHALL dispatch job A before job B
+
+#### Scenario: Queue position reflects FIFO order
+
+- **WHEN** a new job is created via `POST /api/v1/jobs`
+- **THEN** the response `queue_position` SHALL equal the count of queued jobs with `created_at` earlier than the new job
+
+<!-- @trace
+source: remove-job-priority
+updated: 2026-03-24
+code:
+  - frontend/src/pages/NewJob.vue
+  - backend/db.py
+  - docs/system-spec.md
+  - backend/services/queue.py
+  - backend/routers/jobs.py
+  - backend/models/job.py
+tests:
+  - backend/tests/test_rerun_chain.py
+  - backend/tests/test_rerun_models.py
+  - backend/tests/test_rerun_api.py
+-->

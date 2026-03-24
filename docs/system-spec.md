@@ -122,7 +122,6 @@
 | jira_ticket | string | 是 | Jira 工單編號（如 JRA-123），前端支援從 Jira URL 自動擷取 |
 | branch | string | 否 | 指定 clone 的 branch，預設 main |
 | extra_prompt | string | 否 | 額外指令（附加在主 prompt 之後） |
-| priority | integer | 否 | 優先級 1-5，預設 3（數字越小越優先） |
 | requested_by | string | 否 | 提交者名稱（前端自動帶入） |
 
 **Response (202 Accepted):**
@@ -163,9 +162,8 @@ queued → cloning → running → completed
 
 **排隊規則：**
 
-1. 按 priority 由小到大排序（1 最優先）。
-2. 相同 priority 按 created_at 先進先出（FIFO）。
-3. 同一個 Jira 工單不能重複排隊（檢查 running + queued 中是否已存在）。
+1. 按 created_at 先進先出（FIFO）。
+2. 同一個 Jira 工單不能重複排隊（檢查 running + queued 中是否已存在）。
 
 ### 4.2 持久化
 

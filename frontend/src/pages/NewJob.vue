@@ -18,7 +18,6 @@ const form = reactive({
   jira_ticket: '',
   branch: '',
   extra_prompt: '',
-  priority: 3,
   requested_by: localStorage.getItem('cra_user') || '',
   agent_mode: 'claude_code',
 })
@@ -173,7 +172,6 @@ async function handleSubmit() {
       jira_ticket: form.jira_ticket.replace(/.*\/browse\//, '').replace(/.*\//, '').toUpperCase(),
       branch: form.branch || undefined,
       extra_prompt: form.extra_prompt || undefined,
-      priority: form.priority,
       requested_by: form.requested_by || undefined,
       agent_mode: form.agent_mode,
       selected_mcps: form.agent_mode === 'copilot' ? selectedMcps.value : [],
@@ -338,18 +336,8 @@ async function handleSubmit() {
           </div>
         </div>
 
-        <!-- Priority, Your Name, Extra Prompt 暫時隱藏
+        <!-- Your Name, Extra Prompt 暫時隱藏
         <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Priority</label>
-            <select class="form-select" v-model.number="form.priority">
-              <option :value="1">1 — Urgent</option>
-              <option :value="2">2 — High</option>
-              <option :value="3">3 — Normal</option>
-              <option :value="4">4 — Low</option>
-              <option :value="5">5 — Background</option>
-            </select>
-          </div>
           <div class="form-group">
             <label class="form-label">Your Name <span style="color: var(--text-hint)">(optional)</span></label>
             <input class="form-input" v-model="form.requested_by" placeholder="Your name" />

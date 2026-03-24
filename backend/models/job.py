@@ -11,7 +11,6 @@ class JobCreate(BaseModel):
     jira_ticket: str = Field(..., description="Jira ticket ID, e.g. JRA-123")
     branch: Optional[str] = Field(None, description="Branch to clone")
     extra_prompt: Optional[str] = Field(None, max_length=2000)
-    priority: int = Field(3, ge=1, le=5)
     requested_by: Optional[str] = Field(None, max_length=100)
     agent_mode: Literal["claude_code", "copilot"] = Field("claude_code", description="Execution engine")
     # MCP 設定（僅 copilot 模式使用，不寫入 DB）
@@ -69,7 +68,6 @@ class JobResponse(BaseModel):
     jira_ticket: str
     branch: Optional[str]
     extra_prompt: Optional[str]
-    priority: int
     requested_by: Optional[str]
     agent_mode: str = "claude_code"
     status: str
