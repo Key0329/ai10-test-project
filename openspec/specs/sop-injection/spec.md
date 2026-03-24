@@ -10,6 +10,8 @@ TBD - created by archiving change 'centralize-jirara-workflow'. Update Purpose a
 
 The executor SHALL invoke Claude Code CLI with `--append-system-prompt-file` flag pointing to the Jirara skill file (`jirara.md`), so that the centralized SOP is injected into every job execution without modifying the cloned repository. The executor SHALL also include `--max-turns` and `--fallback-model` flags in the CLI command to provide agent turn limits and model fallback capability.
 
+The executor prompt SHALL include an explicit instruction that the Jirara workflow takes precedence over any repository-provided development flow skills (e.g., `dev-flow`, `jira-ops`). Repository-provided non-flow skills (e.g., `api-creator`, `component-builder`) SHALL remain active alongside Jirara.
+
 #### Scenario: Successful Jirara injection
 
 - **WHEN** executor dispatches a job
@@ -18,7 +20,17 @@ The executor SHALL invoke Claude Code CLI with `--append-system-prompt-file` fla
 #### Scenario: Jirara file path resolution
 
 - **WHEN** executor constructs the Claude Code command
-- **THEN** the path to `jirara.md` SHALL be resolved dynamically from the project root (not hardcoded), using the project's `.claude/skills/jirara.md` relative path
+- **THEN** the path to `jirara.md` SHALL be resolved dynamically from the project root (not hardcoded), using the project's `.github/skills/jirara/jirara.md` relative path
+
+#### Scenario: Jirara priority over repo dev-flow skills
+
+- **WHEN** the cloned repository contains its own development flow skill (e.g., `.claude/skills/dev-flow/`)
+- **THEN** the executor prompt SHALL instruct that Jirara is the authoritative development workflow and repo-provided flow skills SHALL NOT override Jirara steps
+
+#### Scenario: Repo non-flow skills remain active
+
+- **WHEN** the cloned repository contains non-flow skills (e.g., `api-creator`, `component-builder`)
+- **THEN** those skills SHALL remain available and active alongside Jirara without interference
 
 #### Scenario: Max turns limit included
 
@@ -42,24 +54,14 @@ The executor SHALL invoke Claude Code CLI with `--append-system-prompt-file` fla
 
 
 <!-- @trace
-source: enhance-executor-cli-flags
-updated: 2026-03-19
+source: force-jirara-workflow
+updated: 2026-03-24
 code:
-  - backend/services/executor.py
-  - backend/db.py
-  - frontend/src/pages/JobDetail.jsx
-  - .env.example
-  - frontend/src/api.js
-  - backend/uv.lock
-  - docs/system-spec.md
+  - .github/skills/jirara/SKILL.md
+  - .github/skills/jirara/jirara.md
+  - backend/services/queue.py
+  - backend/models/job.py
   - backend/routers/jobs.py
-  - backend/pyproject.toml
-tests:
-  - backend/tests/__init__.py
-  - backend/tests/test_stream_output.py
-  - backend/tests/conftest.py
-  - backend/tests/test_db.py
-  - backend/tests/test_executor.py
 -->
 
 ---
