@@ -283,3 +283,69 @@ class TestDetectMissingEnvVars:
         }
         result = detect_missing_env_vars(mcp_servers)
         assert result == []
+
+
+class TestScanRepoMcpJson:
+    """Test scan_repo_mcp_json() — remote fetch via GitHub API."""
+
+    @pytest.fixture
+    def mock_urlopen(self, monkeypatch):
+        import urllib.request
+        from unittest.mock import MagicMock
+        mock = MagicMock()
+        monkeypatch.setattr(urllib.request, "urlopen", mock)
+        return mock
+
+    def _make_response(self, data: dict):
+        import base64
+        from unittest.mock import MagicMock
+        content = base64.b64encode(json.dumps(data).encode()).decode()
+        resp = MagicMock()
+        resp.read.return_value = json.dumps({"content": content, "encoding": "base64"}).encode()
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    def test_scan_returns_servers_and_missing_vars(self, mock_urlopen, monkeypatch):
+        from services.mcp_loader import scan_repo_mcp_json
+
+        monkeypatch.delenv("SENTRY_TOKEN", raising=False)
+        mcp_data = {
+            "mcpServers": {
+                "context7": {"type": "stdio", "command": "npx", "args": ["-y", "@upstash/context7-mcp"]},
+                "sentry": {"type": "stdio", "command": "npx", "args": ["--token=${SENTRY_TOKEN}"]},
+            }
+        }
+        mock_urlopen.return_value = self._make_response(mcp_data)
+        result = scan_repo_mcp_json("https://github.com/org/repo", None, "ghp_token")
+        assert sorted(result["servers"]) == ["context7", "sentry"]
+        assert "SENTRY_TOKEN" in result["missing_vars"]
+
+    def test_scan_no_mcp_json_returns_empty(self, mock_urlopen):
+        from services.mcp_loader import scan_repo_mcp_json
+        import urllib.error
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url="", code=404, msg="Not Found", hdrs=None, fp=None
+        )
+        result = scan_repo_mcp_json("https://github.com/org/repo", None, "ghp_token")
+        assert result == {"servers": [], "missing_vars": []}
+
+    def test_scan_with_branch(self, mock_urlopen):
+        from services.mcp_loader import scan_repo_mcp_json
+
+        mcp_data = {"mcpServers": {"s1": {"type": "stdio", "command": "npx", "args": []}}}
+        mock_urlopen.return_value = self._make_response(mcp_data)
+        scan_repo_mcp_json("https://github.com/org/repo", "feature-branch", "ghp_token")
+        call_args = mock_urlopen.call_args
+        req = call_args[0][0]
+        assert "ref=feature-branch" in req.full_url
+
+    def test_scan_all_vars_defined(self, mock_urlopen, monkeypatch):
+        from services.mcp_loader import scan_repo_mcp_json
+
+        monkeypatch.setenv("MY_TOKEN", "set")
+        mcp_data = {"mcpServers": {"s": {"type": "stdio", "command": "npx", "args": ["${MY_TOKEN}"]}}}
+        mock_urlopen.return_value = self._make_response(mcp_data)
+        result = scan_repo_mcp_json("https://github.com/org/repo", None, "ghp_token")
+        assert result["missing_vars"] == []

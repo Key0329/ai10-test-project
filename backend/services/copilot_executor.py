@@ -40,10 +40,14 @@ def _build_copilot_prompt(jira_ticket: str, extra_prompt: str | None, base_branc
         "2. 不要呈現方案讓使用者選擇，直接選擇最合適的方案執行\n"
         "3. 遇到不確定的情況，採取最保守、最安全的做法自行處理\n"
         "\n"
-        "【規範遵守 — 最高優先】\n"
-        "4. 工作目錄就是 clone 下來的 target repo，讀取並遵守 .github/copilot-instructions.md\n"
-        "5. 開始寫任何程式碼之前，必須先閱讀 .github/skills/ 下所有 skill 內容\n"
-        "6. 若存在 jirara skill，嚴格遵照其步驟執行（含 branch 建立、commit、push、PR 建立、Jira 更新）\n"
+        "【開發流程 — 最高優先】\n"
+        "4. 系統已注入 Jirara 開發流程至 .github/skills/jirara/，此為最高優先的開發 SOP\n"
+        "5. 嚴格遵照 Jirara 的步驟執行（含 branch 建立、commit、push、PR 建立、Jira 更新）\n"
+        "6. 若 repo 內有其他開發流程 skill（如 dev-flow、jira-ops），以 Jirara 為準，不得覆蓋 Jirara 步驟\n"
+        "\n"
+        "【Repo 規範 — 次優先】\n"
+        "7. 讀取並遵守 .github/copilot-instructions.md（若存在）\n"
+        "8. Repo 內的非流程類 skill（如 api-creator、component-builder、frontend-design）照常套用\n"
         "\n"
         f"【PR Base Branch】建立 PR 時，base branch 必須指定為 `{base_branch}`\n"
         "\n"
@@ -60,17 +64,16 @@ def _build_system_message() -> str:
         "你是一位資深軟體工程師，正在為一個真實專案進行開發工作。\n"
         "你的工作目錄就是 repo 根目錄，你可以直接讀取和修改裡面的檔案。\n"
         "\n"
-        "## 重要：開發規範優先級\n"
-        "1. `.github/copilot-instructions.md` — coding rules（若存在）\n"
-        "2. `.github/skills/*/SKILL.md` — 實作 patterns（若存在）\n"
-        "這些規範的優先級高於功能需求本身。\n"
+        "## 最高優先：Jirara 開發流程\n"
+        "系統已將 Jirara（jirara skill）注入到 .github/skills/jirara/，此為最高優先的開發 SOP。\n"
+        "1. `cat .github/skills/jirara/SKILL.md` — 讀取 Jirara 完整流程\n"
+        "2. 嚴格遵照 Jirara 步驟執行，不得跳過或簡化\n"
+        "3. 若 repo 內有其他開發流程 skill（如 dev-flow、jira-ops），以 Jirara 為準，不得覆蓋 Jirara 步驟\n"
         "\n"
-        "## CRITICAL: Skills 使用流程\n"
-        "實作前必須：\n"
-        "1. `ls .github/skills/ 2>/dev/null` — 列出所有 skills\n"
-        "2. `head -20 .github/skills/*/SKILL.md` — 瀏覽各 skill 用途\n"
-        "3. `cat .github/skills/<skill-name>/SKILL.md` — 讀取相關 SKILL 完整內容\n"
-        "4. 嚴格遵照 SKILL 規範實作，禁止自創簡化版\n"
+        "## 次優先：Repo 自帶規範\n"
+        "4. `.github/copilot-instructions.md` — coding rules（若存在）\n"
+        "5. `.github/skills/` 下的非流程類 skill（如 api-creator、component-builder、frontend-design）照常套用\n"
+        "6. 開發過程中的每個步驟（命名、架構、測試等）須符合 repo 規範\n"
     )
 
 
@@ -126,8 +129,8 @@ def _detect_skill_dirs(work_dir: str) -> list[str]:
 
 
 def _inject_system_skills(work_dir: str) -> list[str]:
-    """將系統專案的 jirara skill 複製到 work_dir/.github/skills/jirara/。
-    target repo 已有 jirara 則跳過（不覆蓋）。
+    """將系統專案的 jirara skill 強制複製到 work_dir/.github/skills/jirara/。
+    若 target repo 已有 jirara 目錄，先刪除再重新複製（確保使用最新系統版本）。
     回傳實際注入的 skill 名稱列表。
     """
     injected = []
@@ -139,8 +142,7 @@ def _inject_system_skills(work_dir: str) -> list[str]:
     dst = os.path.join(target_skills_dir, "jirara")
 
     if os.path.isdir(dst):
-        # target repo 已有 jirara，保留原版不覆蓋
-        return injected
+        shutil.rmtree(dst)
 
     os.makedirs(target_skills_dir, exist_ok=True)
     shutil.copytree(src, dst)
@@ -320,6 +322,7 @@ async def execute_copilot_job(
     jira_api_token: str = "",
     jira_email: str = "",
     mcp_config: dict | None = None,
+    env_overrides: dict[str, str] | None = None,
 ):
     """對應 v3 AgentService.run()，整合 v4 的 logging / status 機制。"""
     if not _SDK_AVAILABLE:
@@ -444,7 +447,7 @@ async def execute_copilot_job(
             from services.mcp_loader import load_repo_mcp_config, convert_to_copilot_format, detect_missing_env_vars
 
             repo_mcp_raw = load_repo_mcp_config(work_dir)
-            repo_mcp = convert_to_copilot_format(repo_mcp_raw) if repo_mcp_raw else {}
+            repo_mcp = convert_to_copilot_format(repo_mcp_raw, env_overrides=env_overrides or {}) if repo_mcp_raw else {}
 
             if repo_mcp_raw:
                 missing_vars = detect_missing_env_vars(repo_mcp_raw)

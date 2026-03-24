@@ -72,3 +72,10 @@ export async function testMcpServers(selectedMcps, mcpTokens = {}) {
     body: JSON.stringify({ selected_mcps: selectedMcps, mcp_tokens: mcpTokens }),
   });
 }
+
+export async function scanRepoMcp(repoUrl, branch, githubToken) {
+  return request('/mcp/scan', {
+    method: 'POST',
+    body: JSON.stringify({ repo_url: repoUrl, branch: branch || null, github_token: githubToken }),
+  });
+}

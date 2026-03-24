@@ -17,10 +17,27 @@ class JobCreate(BaseModel):
     # MCP 設定（僅 copilot 模式使用，不寫入 DB）
     selected_mcps: list[str] = Field(default_factory=lambda: ["context7"], description="選擇的 MCP server ID 清單")
     mcp_tokens: dict[str, str] = Field(default_factory=dict, description="各 MCP 的 token")
+    # Repo MCP 環境變數覆蓋（${VAR} 展開用，不寫入 DB）
+    env_overrides: dict[str, str] = Field(default_factory=dict, description="環境變數覆蓋，用於展開 .mcp.json 中的 ${VAR}")
     # 憑證欄位：只用於本次執行，不寫入 DB
     github_token: str = Field(..., description="GitHub Personal Access Token")
     jira_api_token: str = Field(..., description="Jira API Token")
     jira_email: str = Field(..., description="Jira account email")
+
+    _BLOCKED_ENV_KEYS = frozenset({
+        "PATH", "HOME", "USER", "SHELL", "LANG", "TERM",
+        "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
+        "GITHUB_TOKEN", "JIRA_API_TOKEN", "JIRA_EMAIL",
+        "COPILOT_GITHUB_TOKEN", "JIRA_BASE_URL", "JIRA_URL",
+    })
+
+    @field_validator("env_overrides")
+    @classmethod
+    def validate_env_overrides(cls, v: dict[str, str]) -> dict[str, str]:
+        blocked = [k for k in v if k.upper() in cls._BLOCKED_ENV_KEYS or k in cls._BLOCKED_ENV_KEYS]
+        if blocked:
+            raise ValueError(f"Forbidden env override keys: {', '.join(blocked)}")
+        return v
 
     @field_validator("jira_ticket")
     @classmethod

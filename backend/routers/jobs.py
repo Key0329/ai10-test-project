@@ -108,9 +108,16 @@ async def create_job(payload: JobCreate):
         mcp_config = mcp_registry.build_session_config(
             payload.selected_mcps, payload.mcp_tokens
         ) if payload.selected_mcps else {}
-        task = asyncio.create_task(execute_copilot_job(mcp_config=mcp_config, **executor_kwargs))
+        task = asyncio.create_task(execute_copilot_job(
+            mcp_config=mcp_config,
+            env_overrides=payload.env_overrides,
+            **executor_kwargs,
+        ))
     else:
-        task = asyncio.create_task(execute_job(**executor_kwargs))
+        task = asyncio.create_task(execute_job(
+            env_overrides=payload.env_overrides,
+            **executor_kwargs,
+        ))
     task.add_done_callback(lambda t, j=job_id: _on_task_done(j, t))
     _running_tasks[job_id] = task
 

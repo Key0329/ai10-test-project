@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { createJob, getMcpList, testMcpServers } from '../api'
+import { createJob, getMcpList, testMcpServers, scanRepoMcp } from '../api'
 import { useCredentials } from '../composables/useCredentials'
 
 const router = useRouter()
@@ -34,6 +34,13 @@ const mcpExpanded = ref(false)
 const mcpTestResults = ref({})
 const mcpInitTested = ref(false)
 
+// Repo MCP scan 狀態
+const scanMissingVars = ref([])
+const scanServers = ref([])
+const envOverrides = ref({})
+const scanLoading = ref(false)
+let scanDebounceTimer = null
+
 // 載入 MCP 清單
 onMounted(async () => {
   try {
@@ -54,6 +61,29 @@ watch(() => form.agent_mode, async (mode) => {
       return !(mcp?.token_required && mcp?.token_source === 'user_input')
     }))
   }
+})
+
+// Repo MCP scan：repo_url 或 branch 變化後 debounce 掃描
+watch([() => form.repo_url, () => form.branch], () => {
+  clearTimeout(scanDebounceTimer)
+  scanMissingVars.value = []
+  scanServers.value = []
+  envOverrides.value = {}
+  if (!form.repo_url) return
+  scanDebounceTimer = setTimeout(async () => {
+    const token = credentials.value?.github_token
+    if (!token) return
+    scanLoading.value = true
+    try {
+      const res = await scanRepoMcp(form.repo_url, form.branch || null, token)
+      scanMissingVars.value = res.missing_vars || []
+      scanServers.value = res.servers || []
+    } catch {
+      // scan 失敗不阻擋送 job
+    } finally {
+      scanLoading.value = false
+    }
+  }, 800)
 })
 
 async function doTestMcps(ids) {
@@ -148,6 +178,7 @@ async function handleSubmit() {
       agent_mode: form.agent_mode,
       selected_mcps: form.agent_mode === 'copilot' ? selectedMcps.value : [],
       mcp_tokens: form.agent_mode === 'copilot' ? mcpTokens.value : {},
+      env_overrides: envOverrides.value,
       github_token: credentials.github_token,
       jira_api_token: credentials.jira_api_token,
       jira_email: credentials.jira_email,
@@ -247,6 +278,29 @@ async function handleSubmit() {
               載入中...
             </div>
           </div>
+        </div>
+
+        <!-- Repo MCP Token 動態輸入 -->
+        <div v-if="scanMissingVars.length > 0" style="margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px">
+          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; color: #f59e0b">
+            🔑 Repo MCP 需要的環境變數
+          </div>
+          <div style="font-size: 12px; color: var(--text-hint); margin-bottom: 10px">
+            偵測到 <code>.mcp.json</code> 引用了以下未定義的環境變數，請填入對應的 token：
+          </div>
+          <div v-for="varName in scanMissingVars" :key="varName" style="margin-bottom: 6px">
+            <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 2px">{{ varName }}</label>
+            <input
+              class="form-input"
+              type="password"
+              :placeholder="varName"
+              :value="envOverrides[varName] || ''"
+              @input="envOverrides[varName] = $event.target.value"
+            />
+          </div>
+        </div>
+        <div v-if="scanLoading" style="margin-bottom: 16px; font-size: 12px; color: var(--text-hint)">
+          掃描 repo MCP 設定中...
         </div>
 
         <div class="form-group">

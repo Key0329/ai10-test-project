@@ -96,6 +96,65 @@ def detect_missing_env_vars(mcp_servers: dict) -> list[str]:
     return sorted(missing)
 
 
+def scan_repo_mcp_json(
+    repo_url: str,
+    branch: str | None,
+    github_token: str,
+) -> dict:
+    """用 GitHub Contents API 輕量 fetch repo 的 .mcp.json，回傳 servers 和 missing_vars。
+
+    不做 git clone，只 fetch 單一檔案。
+    回傳 {"servers": [...], "missing_vars": [...]}。
+    """
+    import base64
+    import urllib.request
+    import urllib.error
+
+    # 解析 repo_url → owner/repo
+    # https://github.com/org/repo.git → org/repo
+    path = repo_url.replace("https://", "").split("/", 1)[-1]
+    path = path.removesuffix(".git")
+    # 移除 host 前綴（e.g. github.com/）
+    parts = path.split("/", 1)
+    if len(parts) == 2 and "." in parts[0]:
+        # github.com/org/repo → org/repo
+        owner_repo = parts[1]
+    else:
+        owner_repo = path
+
+    api_url = f"https://api.github.com/repos/{owner_repo}/contents/.mcp.json"
+    if branch:
+        api_url += f"?ref={branch}"
+
+    req = urllib.request.Request(api_url, headers={
+        "Authorization": f"Bearer {github_token}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "copilot-dev-system",
+    })
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+        logger.debug("scan_repo_mcp_json failed: %s", e)
+        return {"servers": [], "missing_vars": []}
+
+    # GitHub API 回傳 base64 encoded content
+    try:
+        content_b64 = data.get("content", "")
+        content_str = base64.b64decode(content_b64).decode("utf-8")
+        mcp_data = json.loads(content_str)
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        logger.warning("Failed to parse remote .mcp.json: %s", e)
+        return {"servers": [], "missing_vars": []}
+
+    mcp_servers = mcp_data.get("mcpServers", {})
+    servers = sorted(mcp_servers.keys())
+    missing = detect_missing_env_vars(mcp_servers)
+
+    return {"servers": servers, "missing_vars": missing}
+
+
 # ── 內部輔助函數 ──────────────────────────────────────────────
 
 def _expand_str(value: str, overrides: dict[str, str]) -> str:

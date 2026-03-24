@@ -19,6 +19,11 @@ FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "sonnet")
 
 os.makedirs(WORKSPACE, exist_ok=True)
 
+# ── Jirara SOP 路徑（從專案根目錄動態解析）────────────────────────────────────
+# executor.py → services/ → backend/ → 專案根目錄
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_JIRARA_SKILL_FILE = os.path.join(_PROJECT_ROOT, ".github", "skills", "jirara", "SKILL.md")
+
 
 async def _resolve_base_branch(work_dir: str, requested_branch: str | None) -> str:
     """決定 PR 的 base branch：使用者指定 > dev > lab > main。
@@ -54,12 +59,15 @@ def build_prompt(jira_ticket: str, extra_prompt: str | None, base_branch: str = 
         "2. 不要呈現方案讓使用者選擇，直接選擇最合適的方案執行\n"
         "3. 遇到不確定的情況，採取最保守、最安全的做法自行處理\n"
         "\n"
-        "【規範遵守 — 最高優先】\n"
-        "4. 你目前的工作目錄（cwd）就是剛 clone 下來的 target repo，讀取並嚴格遵守該目錄內的 CLAUDE.md\n"
-        "5. 開始寫任何程式碼之前，必須先閱讀該 target repo 內 .claude/skills/ 下所有 skill 內容，理解本專案的開發規範後才能動手\n"
-        "6. 開發每個功能時，主動判斷哪些 skill 適用並確實套用其 pattern，不得跳過\n"
-        "7. 開發過程中的每個步驟（命名、架構、測試、PR 格式等）都必須符合該 target repo 規範\n"
-        "8. 每次任務的 target repo 語言與規範都不同，以 cwd 內實際存在的 CLAUDE.md 和 skills 為準，不可假設\n"
+        "【開發流程 — 最高優先】\n"
+        "4. 系統已透過 system prompt 注入 Jirara 開發流程（SKILL.md），此流程為最高優先的開發 SOP\n"
+        "5. 嚴格遵照 Jirara 的步驟執行（含 branch 建立、commit、push、PR 建立、Jira 更新）\n"
+        "6. 若 repo 內有其他開發流程 skill（如 dev-flow、jira-ops），以 Jirara 為準，不得覆蓋 Jirara 步驟\n"
+        "\n"
+        "【Repo 規範 — 次優先】\n"
+        "7. 讀取並遵守 target repo 的 CLAUDE.md（若存在）\n"
+        "8. Repo 內的非流程類 skill（如 api-creator、component-builder、frontend-design）照常套用\n"
+        "9. 開發過程中的每個步驟（命名、架構、測試等）須符合 repo 規範\n"
         "\n"
         "\n"
     )
@@ -70,13 +78,13 @@ def build_prompt(jira_ticket: str, extra_prompt: str | None, base_branch: str = 
     return prompt
 
 
-def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
+def build_claude_command(claude_bin: str, prompt: str, jirara_path: str = "") -> list[str]:
     """Build the CLI argument list for Claude Code.
 
-    不注入外部 skill 檔案 — Claude 執行時的 cwd 是 clone 下來的 repo，
-    會自動讀取該 repo 的 CLAUDE.md 與 .claude/skills/，由 Claude 自行決定觸發哪個 skill。
+    透過 --append-system-prompt-file 注入系統 jirara SOP，
+    確保所有任務都走 jirara 開發流程，不依賴 repo 是否自帶 skill。
     """
-    return [
+    cmd = [
         claude_bin,
         "-p",
         "--verbose",
@@ -84,8 +92,11 @@ def build_claude_command(claude_bin: str, prompt: str) -> list[str]:
         "--output-format", "stream-json",
         "--max-turns", MAX_TURNS,
         "--fallback-model", FALLBACK_MODEL,
-        prompt,
     ]
+    if jirara_path and os.path.isfile(jirara_path):
+        cmd += ["--append-system-prompt-file", jirara_path]
+    cmd.append(prompt)
+    return cmd
 
 
 async def _log(
@@ -553,7 +564,8 @@ def _inject_token_to_url(repo_url: str, token: str) -> str:
 
 async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
                       branch: str | None, extra_prompt: str | None,
-                      github_token: str = "", jira_api_token: str = "", jira_email: str = ""):
+                      github_token: str = "", jira_api_token: str = "", jira_email: str = "",
+                      env_overrides: dict[str, str] | None = None):
     """Full execution: clone → claude -p → report result."""
 
     work_dir = os.path.join(WORKSPACE, f"{jira_ticket}-{job_id.split('-')[-1]}")
@@ -613,7 +625,7 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         base_branch = await _resolve_base_branch(work_dir, branch)
         await _log(job_id, "system", f"[PR base branch] {base_branch}")
         prompt = build_prompt(jira_ticket, extra_prompt, base_branch)
-        claude_cmd = build_claude_command(claude_bin, prompt)
+        claude_cmd = build_claude_command(claude_bin, prompt, _JIRARA_SKILL_FILE)
 
         await _log(job_id, "system", f"Running claude -p in {work_dir}")
         await _log(job_id, "system", f"Prompt: {prompt[:500]}")
@@ -629,6 +641,7 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
             limit=10 * 1024 * 1024,  # 10MB：避免 claude 大型輸出觸發 StreamReader 上限
             env={
                 **base_env,
+                **(env_overrides or {}),
                 "GITHUB_TOKEN": github_token,
                 "JIRA_API_TOKEN": jira_api_token,
                 "JIRA_EMAIL": jira_email,
