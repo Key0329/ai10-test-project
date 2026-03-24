@@ -115,9 +115,6 @@ async function handleSubmit() {
               <span>Copilot</span>
             </label>
           </div>
-          <div v-if="form.agent_mode === 'copilot'" style="margin-top: 6px; font-size: 12px; color: var(--text-hint)">
-            需要 target repo 有 .github/skills/jirara/ 與 GitHub Copilot 已登入
-          </div>
         </div>
 
         <!-- MCP 偵測摘要 -->
