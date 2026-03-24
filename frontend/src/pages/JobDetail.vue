@@ -285,10 +285,6 @@ onUnmounted(() => {
         <div class="meta-value">{{ job.requested_by || '-' }}</div>
       </div>
       <div class="meta-item">
-        <div class="meta-label">Priority</div>
-        <div class="meta-value">{{ job.priority }}</div>
-      </div>
-      <div class="meta-item">
         <div class="meta-label">Created</div>
         <div class="meta-value">{{ new Date(job.created_at).toLocaleString('zh-TW') }}</div>
       </div>
