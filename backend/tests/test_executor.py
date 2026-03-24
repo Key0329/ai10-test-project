@@ -37,21 +37,36 @@ class TestBuildPrompt:
 
 
 class TestBuildClaudeCommand:
-    """Verify CLI command includes --append-system-prompt-file with jirara.md."""
+    """Verify CLI command construction with optional jirara injection."""
 
-    def test_command_includes_append_system_prompt_file(self):
+    def test_command_includes_append_system_prompt_file_when_path_exists(self, tmp_path):
         from services.executor import build_claude_command
 
-        cmd = build_claude_command("/usr/bin/claude", "prompt text")
+        jirara_file = tmp_path / "SKILL.md"
+        jirara_file.write_text("# Jirara")
+        cmd = build_claude_command("/usr/bin/claude", "prompt text", str(jirara_file))
         assert "--append-system-prompt-file" in cmd
 
-    def test_command_jirara_path_ends_with_jirara_md(self):
+    def test_command_omits_append_when_path_missing(self):
+        from services.executor import build_claude_command
+
+        cmd = build_claude_command("/usr/bin/claude", "prompt text", "/nonexistent/path.md")
+        assert "--append-system-prompt-file" not in cmd
+
+    def test_command_omits_append_when_no_path(self):
         from services.executor import build_claude_command
 
         cmd = build_claude_command("/usr/bin/claude", "prompt text")
+        assert "--append-system-prompt-file" not in cmd
+
+    def test_jirara_path_is_argument_after_flag(self, tmp_path):
+        from services.executor import build_claude_command
+
+        jirara_file = tmp_path / "SKILL.md"
+        jirara_file.write_text("# Jirara")
+        cmd = build_claude_command("/usr/bin/claude", "prompt text", str(jirara_file))
         idx = cmd.index("--append-system-prompt-file")
-        jirara_path = cmd[idx + 1]
-        assert jirara_path.endswith("jirara.md")
+        assert cmd[idx + 1] == str(jirara_file)
 
     def test_command_includes_print_mode_and_dangerous_flag(self):
         from services.executor import build_claude_command
@@ -89,33 +104,18 @@ class TestBuildClaudeCommand:
         assert cmd[idx + 1] == "sonnet"
 
 
-class TestJiraraFileValidation:
-    """Verify Jirara skill file path resolution and startup validation."""
+class TestJiraraSkillFile:
+    """Verify Jirara skill file path resolution."""
 
     def test_jirara_path_is_absolute(self):
-        from services.executor import JIRARA_SKILL_PATH
+        from services.executor import _JIRARA_SKILL_FILE
 
-        assert os.path.isabs(JIRARA_SKILL_PATH)
+        assert os.path.isabs(_JIRARA_SKILL_FILE)
 
     def test_jirara_path_ends_with_expected_suffix(self):
-        from services.executor import JIRARA_SKILL_PATH
+        from services.executor import _JIRARA_SKILL_FILE
 
-        expected_suffix = os.path.join(".claude", "skills", "jirara.md")
-        assert JIRARA_SKILL_PATH.endswith(expected_suffix)
-
-    def test_validate_jirara_raises_on_missing_file(self):
-        from services.executor import validate_jirara_skill
-
-        with pytest.raises(RuntimeError, match="jirara"):
-            validate_jirara_skill("/nonexistent/path/jirara.md")
-
-    def test_validate_jirara_passes_on_existing_file(self, tmp_path):
-        from services.executor import validate_jirara_skill
-
-        fake_jirara = tmp_path / "jirara.md"
-        fake_jirara.write_text("# Jirara")
-        # Should not raise
-        validate_jirara_skill(str(fake_jirara))
+        assert _JIRARA_SKILL_FILE.endswith(os.path.join(".github", "skills", "jirara", "SKILL.md"))
 
 
 class TestBackwardCompatibility:
