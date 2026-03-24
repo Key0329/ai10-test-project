@@ -44,8 +44,10 @@ CREATE TABLE IF NOT EXISTS job_logs (
 
 async def get_db() -> aiosqlite.Connection:
     os.makedirs(DB_DIR, exist_ok=True)
-    db = await aiosqlite.connect(DB_PATH)
+    db = await aiosqlite.connect(DB_PATH, timeout=30)
     db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA busy_timeout=5000")
     return db
 
 

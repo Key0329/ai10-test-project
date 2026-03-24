@@ -28,11 +28,7 @@ echo ""
 # ── Python venv & deps ──
 echo "Setting up Python backend..."
 cd "$(dirname "$0")"
-if [ ! -d "backend/.venv" ]; then
-  python3 -m venv backend/.venv
-fi
-source backend/.venv/bin/activate
-pip install -q -r backend/requirements.txt
+cd backend && uv sync && cd ..
 echo "  ✅ Python dependencies installed"
 
 # ── Frontend build ──
