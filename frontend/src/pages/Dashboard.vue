@@ -5,7 +5,7 @@ import { listJobs } from '../api'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useCredentials } from '../composables/useCredentials'
 
-const { credentials, save: saveCredentials } = useCredentials()
+const { credentials, rememberEmail, save: saveCredentials } = useCredentials()
 const showTokens = ref({ github: false, jira: false })
 
 function onCredentialInput() {
@@ -77,7 +77,7 @@ onUnmounted(() => {
     <!-- Credentials 設定區 -->
     <div style="border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 16px; margin-bottom: 16px">
       <div style="font-size: 11px; font-weight: 600; color: var(--text-hint); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px">
-        🔑 API Credentials <span style="font-weight: 400; color: var(--text-dim)">(session only · 關分頁即清除)</span>
+        🔑 API Credentials <span style="font-weight: 400; color: var(--text-dim)">(Token 關分頁即清除)</span>
       </div>
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px">
         <div>
@@ -124,6 +124,10 @@ onUnmounted(() => {
             placeholder="you@company.com"
             @input="onCredentialInput"
           />
+          <label style="display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 11px; color: var(--text-hint); cursor: pointer; user-select: none">
+            <input type="checkbox" v-model="rememberEmail" @change="onCredentialInput" />
+            記住 Email
+          </label>
         </div>
       </div>
     </div>
