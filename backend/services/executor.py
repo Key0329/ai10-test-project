@@ -159,6 +159,9 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
                 name = block.get("name", "?")
                 inp = block.get("input", {})
                 desc = inp.get("description", inp.get("command", inp.get("pattern", "")))
+                # Skill tool: extract skill name from input
+                if name == "Skill" and not desc:
+                    desc = inp.get("skill", "")
                 if isinstance(desc, str) and len(desc) > 120:
                     desc = desc[:120] + "..."
                 if name.startswith("mcp__"):
@@ -189,8 +192,8 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
     if event_type == "result":
         subtype = parsed.get("subtype", "")
         result_text = parsed.get("result", "")
-        if isinstance(result_text, str) and len(result_text) > 300:
-            result_text = result_text[:300] + "..."
+        if isinstance(result_text, str) and len(result_text) > 2000:
+            result_text = result_text[:2000] + "..."
         return event_type, f"[{subtype}] {result_text}" if result_text else None
     return event_type, None
 
@@ -674,6 +677,7 @@ async def execute_job(job_id: str, repo_url: str, jira_ticket: str,
         # Emit execution summary and compliance check before final status update
         await _emit_summary(job_id)
         await _emit_compliance_check(job_id, work_dir)
+        await _log(job_id, "system", "done", event_type="done")
 
         if exit_code == 0:
             await _update_status(

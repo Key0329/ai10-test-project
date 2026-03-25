@@ -108,7 +108,8 @@ function tagLabel(entry) {
   if (entry.event_type === 'tool_result') return 'RES'
   if (entry.event_type === 'assistant') return 'AI'
   if (entry.event_type === 'system') return 'INIT'
-  if (entry.event_type === 'result') return 'DONE'
+  if (entry.event_type === 'result') return 'RESULT'
+  if (entry.event_type === 'done') return 'DONE'
   return entry.event_type || entry.stream
 }
 
@@ -122,6 +123,7 @@ function tagColor(entry) {
   if (entry.event_type === 'assistant') return '#7ba3c9'
   if (entry.event_type === 'system') return '#75736e'
   if (entry.event_type === 'result') return '#6aab87'
+  if (entry.event_type === 'done') return '#6aab87'
   return '#75736e'
 }
 

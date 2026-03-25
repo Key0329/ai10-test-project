@@ -603,6 +603,7 @@ async def execute_copilot_job(
         await _emit_copilot_mcp_summary(job_id)
 
         await _log(job_id, "system", "[Copilot] 執行完成")
+        await _log(job_id, "system", "done", event_type="done")
         await _update_status(
             job_id, "completed",
             exit_code=0,
