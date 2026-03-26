@@ -64,6 +64,10 @@ def build_prompt(jira_ticket: str, extra_prompt: str | None, base_branch: str = 
         "5. 嚴格遵照 Jirara 的步驟執行（含 branch 建立、commit、push、PR 建立、Jira 更新）\n"
         "6. 若 repo 內有其他開發流程 skill（如 dev-flow、jira-ops），以 Jirara 為準，不得覆蓋 Jirara 步驟\n"
         "\n"
+        "【MCP 工具使用】\n"
+        "10. 不要使用 ListMcpResourcesTool（已知有 SQLite binding bug），直接使用 mcp__<server>__<tool> 格式呼叫 MCP 工具\n"
+        "11. 若任何 MCP 工具呼叫失敗，跳過該工具並嘗試替代方案，不要重試超過 2 次\n"
+        "\n"
         "【Repo 規範 — 次優先】\n"
         "7. 讀取並遵守 target repo 的 CLAUDE.md（若存在）\n"
         "8. Repo 內的非流程類 skill（如 api-creator、component-builder、frontend-design）照常套用\n"
@@ -107,6 +111,13 @@ async def _log(
     metadata: str | None = None,
 ):
     """Write a log line to DB."""
+    # 防禦：確保所有參數都是 SQLite 可綁定的標量型別
+    if not isinstance(message, str):
+        message = str(message)
+    if not isinstance(event_type, str):
+        event_type = str(event_type)
+    if metadata is not None and not isinstance(metadata, str):
+        metadata = str(metadata)
     db = await get_db()
     try:
         await db.execute(
@@ -180,7 +191,9 @@ def _extract_display_message(event_type: str, parsed: dict) -> tuple[str, str | 
         result = parsed.get("tool_use_result", "")
         if isinstance(result, dict):
             result = result.get("stdout", "") or result.get("stderr", "")
-        if isinstance(result, str) and len(result) > 200:
+        if not isinstance(result, str):
+            result = str(result)
+        if len(result) > 200:
             result = result[:200] + "..."
         return "tool_result", result or None
     if event_type == "system":
